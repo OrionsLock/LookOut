@@ -23,7 +23,7 @@ export async function resolveTarget(page: Page, target: TargetRef): Promise<Reso
   }
 
   if (target.role && target.name) {
-    const loc = page.getByRole(target.role as never, { name: target.name });
+    const loc = page.getByRole(target.role as Parameters<Page["getByRole"]>[0], { name: target.name });
     if ((await countVisible(loc)) === 1) {
       return {
         locator: loc,

@@ -12,7 +12,7 @@ Concise pre-launch pass over trust, safety, and known limits. This is not a warr
 
 ## Trust & CI semantics
 
-- **`lookout ci --retries N`**: can exit 0 if a later attempt passes after failures; stderr emits `flake_suspected` when that happens.
+- **`lookout ci --retries N`**: retries on **verdict / issue gate** failures and on **orchestrator** failures (e.g. browser launch); stderr emits `flake_suspected` when a later attempt passes after an earlier failure.
 - **`lookout ci --retries N --strict-retry`**: a pass that required a retry exits **1** (JUnit still reflects the passing attempt’s run for debugging). Use on mainline when retry tolerance is unacceptable.
 - **`lookout verify-run`**: optional second gate — LLM judge `accept`/`reject` from export bundle; exit 1 on `reject`. Mock provider always accepts.
 

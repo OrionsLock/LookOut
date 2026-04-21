@@ -103,7 +103,12 @@ async function cmdRun(opts: {
     config = { ...config, baseUrl: opts.url };
   }
   if (opts.maxSteps) {
-    config = { ...config, crawl: { ...config.crawl, maxStepsPerGoal: Number(opts.maxSteps) } };
+    const n = Number.parseInt(opts.maxSteps, 10);
+    if (!Number.isFinite(n) || n < 1 || n > 200) {
+      process.stderr.write(chalk.red(`invalid --max-steps: ${opts.maxSteps} (use integer 1–200)\n`));
+      process.exit(2);
+    }
+    config = { ...config, crawl: { ...config.crawl, maxStepsPerGoal: n } };
   }
   if (opts.goal) {
     const g = config.crawl.goals.filter((x) => x.id === opts.goal);
@@ -188,6 +193,19 @@ async function cmdCi(opts: {
       process.stderr.write(
         JSON.stringify({ level: "error", phase: "lookout_ci", attempt, maxAttempts, err: res.error }) + "\n",
       );
+      if (attempt < maxAttempts) {
+        process.stderr.write(
+          JSON.stringify({
+            level: "info",
+            phase: "lookout_ci",
+            will_retry: true,
+            reason: "orchestrator_failed",
+            attempt,
+            maxAttempts,
+          }) + "\n",
+        );
+        continue;
+      }
       process.exit(2);
     }
     const runId = res.value.runId;

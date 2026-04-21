@@ -170,6 +170,12 @@ export function createOrchestrator(opts: OrchestratorOpts): Orchestrator {
         const orderedGoals = goalsInConfig
           .map((c) => dbGoals.find((g) => g.id === `${run.id}_${c.id}`))
           .filter((g): g is Goal => !!g);
+        if (orderedGoals.length !== goalsInConfig.length) {
+          log.warn(
+            { configured: goalsInConfig.length, resolved: orderedGoals.length, runId: run.id },
+            "goals_resolution_mismatch",
+          );
+        }
         const concurrency = config.crawl.maxParallelAgents;
 
         const traceOn = config.report.traceOnFailure;

@@ -58,6 +58,8 @@ pnpm exec lookout runs export <runId> --out run-bundle.json
 
 The `@lookout/mcp-server` package exposes stdio tools: `lookout_list_runs`, `lookout_list_issues`, **`lookout_diff_runs`**, and **`lookout_export_run`** (same diff/export semantics as the CLI) for Cursor and other MCP clients. After `pnpm build`, run `pnpm exec lookout-mcp` from the repo root (binary `lookout-mcp` in that package), or point your MCP server command at `packages/mcp-server/dist/main.js` with working directory set to a project that contains `.lookout`.
 
+Set **`LOOKOUT_MCP_ROOT`** to an absolute workspace parent (e.g. `/home/me/repos`) so MCP tool `cwd` arguments cannot escape outside that directory. See **`SECURITY.md`**.
+
 ## Development
 
 ```bash

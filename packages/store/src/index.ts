@@ -5,7 +5,7 @@ import { gzipSync, gunzipSync } from "node:zlib";
 import Database from "better-sqlite3";
 import { ulid } from "ulid";
 import type { A11ySnapshot, Goal, Issue, Run, Step } from "@lookout/types";
-import { err, ok, type Result } from "@lookout/types";
+import { ActionSchema, err, ok, type Result } from "@lookout/types";
 
 export type Baseline = {
   urlHash: string;
@@ -81,6 +81,50 @@ function assertSafeRelativeName(name: string): void {
   if (name.trim() === "") {
     throw new Error("invalid_path: empty name");
   }
+}
+
+/** Resolve `relPath` under `storeRoot` and ensure the result stays inside `storeRoot`. */
+function resolvePathUnderStoreRoot(storeRoot: string, relPath: string): string {
+  const normalized = relPath.replaceAll("\\", "/").replace(/^\//, "");
+  if (!normalized || normalized.includes("\0")) {
+    throw new Error("invalid_path: empty or NUL");
+  }
+  if (path.isAbsolute(normalized)) {
+    throw new Error("invalid_path: absolute path rejected");
+  }
+  if (normalized.split("/").some((seg) => seg === "..")) {
+    throw new Error("invalid_path: path traversal rejected");
+  }
+  const rootResolved = path.resolve(storeRoot);
+  const full = path.resolve(path.join(storeRoot, ...normalized.split("/")));
+  const rel = path.relative(rootResolved, full);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error("invalid_path: escapes store root");
+  }
+  return full;
+}
+
+function parseStoredAction(json: string): Step["action"] {
+  try {
+    const raw = JSON.parse(json) as unknown;
+    const parsed = ActionSchema.safeParse(raw);
+    if (parsed.success) return parsed.data;
+  } catch {
+    // fall through
+  }
+  return { kind: "stuck", reason: "stored_action_invalid" };
+}
+
+function parseIssueDetail(json: string): Record<string, unknown> {
+  try {
+    const v = JSON.parse(json) as unknown;
+    if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+      return v as Record<string, unknown>;
+    }
+  } catch {
+    // fall through
+  }
+  return { parse_error: true };
 }
 
 export function normalizeUrl(url: string): string {
@@ -412,7 +456,7 @@ class SqliteStore implements Store {
       goalId: r.goal_id,
       idx: r.idx,
       url: r.url,
-      action: JSON.parse(r.action_json) as Step["action"],
+      action: parseStoredAction(r.action_json),
       selectorResolved: r.selector_resolved,
       screenshotBefore: r.screenshot_before,
       screenshotAfter: r.screenshot_after,
@@ -462,7 +506,7 @@ class SqliteStore implements Store {
       severity: r.severity as Issue["severity"],
       category: r.category as Issue["category"],
       title: r.title,
-      detail: JSON.parse(r.detail_json) as Record<string, unknown>,
+      detail: parseIssueDetail(r.detail_json),
       createdAt: r.created_at,
     }));
   }
@@ -573,7 +617,7 @@ export async function readA11ySnapshotFromStore(
   storeRoot: string,
   relPath: string,
 ): Promise<A11ySnapshot> {
-  const full = path.join(storeRoot, relPath.replaceAll("\\", "/"));
+  const full = resolvePathUnderStoreRoot(storeRoot, relPath);
   const buf = await readFile(full);
   const json = gunzipSync(buf).toString("utf8");
   return JSON.parse(json) as A11ySnapshot;

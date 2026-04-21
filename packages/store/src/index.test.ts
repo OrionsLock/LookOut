@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createStore, normalizeUrl, urlHash } from "./index.js";
+import Database from "better-sqlite3";
+import { createStore, normalizeUrl, readA11ySnapshotFromStore, urlHash } from "./index.js";
 
 const tmp = path.join(process.cwd(), "tmp-store");
 
@@ -62,6 +63,42 @@ describe("Store", () => {
     expect(issues).toHaveLength(1);
 
     store.close();
+  });
+
+  it("readA11ySnapshotFromStore rejects path traversal", async () => {
+    const root = path.join(tmp, "a11y-sec");
+    await expect(readA11ySnapshotFromStore(root, "../etc/passwd")).rejects.toThrow(/invalid_path/);
+  });
+
+  it("listStepsForGoal tolerates corrupt stored action JSON", async () => {
+    const root = path.join(tmp, "corrupt-action");
+    const store = createStore(root);
+    expect((await store.init()).ok).toBe(true);
+    const run = await store.createRun({ baseUrl: "http://localhost:3000" });
+    const goal = await store.createGoal({ runId: run.id, prompt: "12345678901" });
+    const step = await store.recordStep({
+      goalId: goal.id,
+      idx: 0,
+      url: "http://localhost:3000/",
+      action: { kind: "wait", ms: 0, intent: "x" },
+      selectorResolved: null,
+      screenshotBefore: null,
+      screenshotAfter: null,
+      a11yTreePath: null,
+      verdict: "ok",
+      durationMs: 1,
+    });
+    store.close();
+    const dbPath = path.join(root, "runs.db");
+    const db = new Database(dbPath);
+    db.prepare("UPDATE steps SET action_json = ? WHERE id = ?").run("{not-json", step.id);
+    db.close();
+    const store2 = createStore(root);
+    expect((await store2.init()).ok).toBe(true);
+    const steps = await store2.listStepsForGoal(goal.id);
+    expect(steps).toHaveLength(1);
+    expect(steps[0].action).toEqual({ kind: "stuck", reason: "stored_action_invalid" });
+    store2.close();
   });
 
   it("rejects path traversal in putScreenshot", async () => {

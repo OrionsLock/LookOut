@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Store**: `readA11ySnapshotFromStore` validates relative paths under the store root; **`listStepsForGoal`** / **`listIssuesForRun`** safely parse stored JSON (`ActionSchema`, fallbacks on corrupt data).
+- **MCP**: Optional **`LOOKOUT_MCP_ROOT`** env restricts tool `cwd`; **`pnpm run`** / docs updated.
+- **Explorer**: **`navigate`** allows only **http/https**; **`wait`** uses `setTimeout` instead of deprecated **`page.waitForTimeout`**; invalid **network** regex patterns in config are skipped.
+- **CLI**: **`lookout ci`** retries when **`orch.run()`** fails (same `--retries` budget); **`--max-steps`** validated as integer **1–200**.
+- **Core**: Warn when configured goals do not all resolve from the DB.
+
 ## 0.5.0 — Parallel Agents & CI Mode
 
 - Parallel goal execution with configurable concurrency

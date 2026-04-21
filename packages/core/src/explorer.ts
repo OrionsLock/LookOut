@@ -107,11 +107,26 @@ async function act(page: Page, action: Action): Promise<ActResult> {
       }
     }
     case "navigate": {
+      let u: URL;
+      try {
+        u = new URL(action.url);
+      } catch (e) {
+        return { verdict: "error", selector: null, error: e };
+      }
+      if (u.protocol !== "http:" && u.protocol !== "https:") {
+        return {
+          verdict: "error",
+          selector: null,
+          error: new Error(`navigate blocked: only http(s) allowed, got ${u.protocol}`),
+        };
+      }
       await page.goto(action.url, { timeout: 15_000, waitUntil: "domcontentloaded" });
       return { verdict: "ok", selector: null };
     }
     case "wait": {
-      await page.waitForTimeout(action.ms);
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, action.ms);
+      });
       return { verdict: "ok", selector: null };
     }
     case "assert": {
@@ -246,7 +261,17 @@ export function createExplorer(opts: ExplorerOpts): Explorer {
             if (!n.status) continue;
             const code = String(n.status);
             const patterns = checks.network.failOn;
-            const hit = patterns.some((p) => new RegExp(p).test(code));
+            let hit = false;
+            for (const p of patterns) {
+              try {
+                if (new RegExp(p).test(code)) {
+                  hit = true;
+                  break;
+                }
+              } catch {
+                // invalid regex in config — skip pattern
+              }
+            }
             if (!hit) continue;
             const sev = code.startsWith("5") ? "major" : "minor";
             await store.recordIssue({

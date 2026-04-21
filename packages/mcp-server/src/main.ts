@@ -3,7 +3,12 @@ import path from "node:path";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { buildRunExportBundle, createStore, diffIssuesByFingerprint } from "@lookout/store";
+import {
+  buildRunExportBundle,
+  createStore,
+  diffIssuesByFingerprint,
+  type StoreWithRoot,
+} from "@lookout/store";
 
 const server = new Server({ name: "lookout-mcp", version: "0.5.0" }, { capabilities: { tools: {} } });
 
@@ -15,7 +20,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object",
         properties: {
-          cwd: { type: "string", description: "Project root containing .lookout/" },
+          cwd: {
+            type: "string",
+            description:
+              "Project root containing .lookout/ (absolute or relative). If env LOOKOUT_MCP_ROOT is set, cwd must resolve under that directory.",
+          },
           limit: { type: "number", description: "Max runs (default 10)" },
         },
         required: ["cwd"],
@@ -27,7 +36,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object",
         properties: {
-          cwd: { type: "string" },
+          cwd: {
+            type: "string",
+            description: "Project root; optional LOOKOUT_MCP_ROOT must contain resolved cwd when set.",
+          },
           runId: { type: "string" },
         },
         required: ["cwd", "runId"],
@@ -40,7 +52,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object",
         properties: {
-          cwd: { type: "string" },
+          cwd: {
+            type: "string",
+            description: "Project root; optional LOOKOUT_MCP_ROOT must contain resolved cwd when set.",
+          },
           runIdA: { type: "string" },
           runIdB: { type: "string" },
         },
@@ -54,7 +69,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object",
         properties: {
-          cwd: { type: "string" },
+          cwd: {
+            type: "string",
+            description: "Project root; optional LOOKOUT_MCP_ROOT must contain resolved cwd when set.",
+          },
           runId: { type: "string" },
         },
         required: ["cwd", "runId"],
@@ -75,14 +93,61 @@ function pickString(obj: Record<string, unknown>, key: string): string {
   return typeof v === "string" ? v : "";
 }
 
+type McpTextResponse = { content: [{ type: "text"; text: string }] };
+
+/**
+ * Resolve MCP `cwd` to an absolute path. If `LOOKOUT_MCP_ROOT` is set, `cwd` must lie under that directory.
+ */
+function resolveMcpCwd(raw: string): { ok: true; cwd: string } | { ok: false; response: McpTextResponse } {
+  const t = raw.trim();
+  if (!t) {
+    return {
+      ok: false,
+      response: { content: [{ type: "text", text: JSON.stringify({ ok: false, error: "cwd_empty" }) }] },
+    };
+  }
+  const resolved = path.resolve(t);
+  const guard = process.env.LOOKOUT_MCP_ROOT?.trim();
+  if (guard) {
+    const root = path.resolve(guard);
+    const rel = path.relative(root, resolved);
+    if (rel.startsWith("..") || path.isAbsolute(rel)) {
+      return {
+        ok: false,
+        response: {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                ok: false,
+                error: "cwd_outside_LOOKOUT_MCP_ROOT",
+                detail: "Set LOOKOUT_MCP_ROOT to a single parent directory and pass cwd under it.",
+              }),
+            },
+          ],
+        },
+      };
+    }
+  }
+  return { ok: true, cwd: resolved };
+}
+
+function openStoreAtProjectRoot(rawCwd: string): { ok: true; store: StoreWithRoot; cwd: string } | { ok: false; response: McpTextResponse } {
+  const cwdRes = resolveMcpCwd(rawCwd);
+  if (!cwdRes.ok) return cwdRes;
+  const store = createStore(path.join(cwdRes.cwd, ".lookout"));
+  return { ok: true, store, cwd: cwdRes.cwd };
+}
+
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
   const a = toolArgs(args);
 
   if (name === "lookout_list_runs") {
-    const cwd = pickString(a, "cwd");
+    const opened = openStoreAtProjectRoot(pickString(a, "cwd"));
+    if (!opened.ok) return opened.response;
+    const { store } = opened;
     const limit = typeof a.limit === "number" ? a.limit : 10;
-    const store = createStore(path.join(cwd, ".lookout"));
     try {
       const init = await store.init();
       if (!init.ok) {
@@ -96,9 +161,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   if (name === "lookout_list_issues") {
-    const cwd = pickString(a, "cwd");
+    const opened = openStoreAtProjectRoot(pickString(a, "cwd"));
+    if (!opened.ok) return opened.response;
+    const { store } = opened;
     const runId = pickString(a, "runId");
-    const store = createStore(path.join(cwd, ".lookout"));
     try {
       const init = await store.init();
       if (!init.ok) {
@@ -112,10 +178,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   if (name === "lookout_diff_runs") {
-    const cwd = pickString(a, "cwd");
+    const opened = openStoreAtProjectRoot(pickString(a, "cwd"));
+    if (!opened.ok) return opened.response;
+    const { store } = opened;
     const runIdA = pickString(a, "runIdA");
     const runIdB = pickString(a, "runIdB");
-    const store = createStore(path.join(cwd, ".lookout"));
     try {
       const init = await store.init();
       if (!init.ok) {
@@ -155,10 +222,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   if (name === "lookout_export_run") {
-    const cwd = pickString(a, "cwd");
+    const opened = openStoreAtProjectRoot(pickString(a, "cwd"));
+    if (!opened.ok) return opened.response;
+    const { store, cwd } = opened;
     const runId = pickString(a, "runId");
     const storeRoot = path.join(cwd, ".lookout");
-    const store = createStore(storeRoot);
     try {
       const init = await store.init();
       if (!init.ok) {
