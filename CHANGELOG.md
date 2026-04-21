@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Docs**: README reframed around thesis + differentiators + visual preview; **`docs/GITHUB_REPO_SETTINGS.md`** for description / website / topics / social preview / **`v0.5.0`** release checklist; **`docs/assets/github-social-preview.png`** (1280×640) for GitHub social upload and README hero.
 - **Store**: `readA11ySnapshotFromStore` validates relative paths under the store root; **`listStepsForGoal`** / **`listIssuesForRun`** safely parse stored JSON (`ActionSchema`, fallbacks on corrupt data).
 - **MCP**: Optional **`LOOKOUT_MCP_ROOT`** env restricts tool `cwd`; **`pnpm run`** / docs updated.
 - **Explorer**: **`navigate`** allows only **http/https**; **`wait`** uses `setTimeout` instead of deprecated **`page.waitForTimeout`**; invalid **network** regex patterns in config are skipped.

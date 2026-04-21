@@ -2,9 +2,43 @@
 
 [![CI](https://github.com/OrionsLock/LookOut/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/OrionsLock/LookOut/actions/workflows/ci.yml)
 
-An AI QA engineer for your web apps. Point it at a URL; it explores with Playwright and an LLM, records issues, and produces HTML reports.
+**Most “AI QA” demos stop at a chat box. Lookout is built for the boring part that matters in production:** autonomous browser exploration, durable artifacts, CI semantics, and editor-native tooling—so a run is something you can **diff**, **gate**, and **re-open** next week.
 
-Lookout is an open-source project by [OrionsLock](https://orionslock.com).
+It exists because teams already have Playwright and LLMs, but not a single loop that (1) explores like a human, (2) **writes evidence** (HTML report, screenshots, optional traces), (3) **exports Playwright specs** from real runs, (4) exposes the same store over **MCP** to Cursor-style clients, and (5) supports a **second-pass LLM judge** (`verify-run`) and **flake-as-signal** retries in CI—not just pass/fail noise.
+
+Open source by [OrionsLock](https://orionslock.com). **Repo presentation checklist** (description, topics, social image, first release): [`docs/GITHUB_REPO_SETTINGS.md`](docs/GITHUB_REPO_SETTINGS.md).
+
+---
+
+### What’s different (not “another Playwright wrapper”)
+
+| Idea | What you get |
+|------|----------------|
+| **Agent discovers, specs remain** | Goals drive exploration; completed flows can emit **real Playwright tests** (`generate-tests`, `runs emit-playwright`). |
+| **MCP-native store** | `@lookout/mcp-server` stdio tools list runs/issues, **diff runs**, **export bundles**—same semantics as the CLI. Optional **`LOOKOUT_MCP_ROOT`** sandbox for `cwd` ([`SECURITY.md`](SECURITY.md)). |
+| **Verifier-in-the-loop** | After CI, **`lookout verify-run`** runs an LLM judge on the **export bundle** (`accept` / `reject`, exit codes for pipelines). |
+| **Flake as signal** | **`lookout ci --retries`** with stderr JSON (`flake_suspected`, `will_retry`) and **`--strict-retry`** when you want “green only if first attempt passed.” |
+| **Trust primitives** | **`runs diff`** (fingerprinted issues), **`runs export`** (bundle v2 with steps + trace paths), JUnit from CI, traces on failure. |
+
+---
+
+### What it looks like
+
+Lookout’s primary surface is the **HTML report** (issues, steps, evidence paths)—not a transcript.
+
+![Representative HTML report / product UI (marketing preview)](docs/assets/report-preview.png)
+
+*Illustrative layout: real runs write `report.html` under `.lookout/runs/<id>/`. Run the smoke demo locally to generate one in seconds (see **Quick start** below).*
+
+**Moving demo (GIF / asciinema):** not embedded yet—PRs welcome. Until then, a **one-command** local proof (Next demo + `lookout ci` + `lookout verify-run` + MCP stdio checks) is:
+
+```bash
+pnpm install && pnpm run playwright:install && pnpm build && pnpm run prove
+```
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for CI parity details.
+
+---
 
 ## Quick start
 
@@ -14,51 +48,28 @@ pnpm build
 pnpm exec lookout --help
 ```
 
-See `examples/nextjs-demo` for a runnable demo application.
-
-## Golden path (local smoke)
-
-This matches the CI end-to-end check: mock LLM, no API keys, Chromium via Playwright. `pnpm run playwright:install` uses **`--with-deps`** on Linux (CI installs apt libraries); on Windows and macOS the deps step is effectively skipped.
+Runnable app + mock LLM smoke (no API keys):
 
 ```bash
-pnpm install
 pnpm run playwright:install
 pnpm build
 pnpm --filter nextjs-demo build
 pnpm --filter nextjs-demo start
-```
-
-In another terminal, from the repo root:
-
-```bash
+# other terminal:
 pnpm exec lookout ci -C examples/nextjs-demo --config lookout.smoke.json
 ```
 
-`lookout ci` exits non-zero on regressions and can emit JUnit with `--junit out.xml`. Use `--retries <0-5>` to re-run the full crawl after a failing attempt; the process exits 0 if **any** attempt passes, and stderr includes JSON with `flake_suspected` when a later attempt succeeds. Combine with **`--strict-retry`** so a pass that only happened after a failed attempt still exits **1** (strict mainline). Failed attempts that will retry also log `will_retry` on stderr. Use `lookout run` for interactive runs and HTML reports.
+`lookout ci` is non-zero on regressions; add **`--junit out.xml`** for CI dashboards. After a run: **`pnpm exec lookout verify-run -C examples/nextjs-demo --config lookout.smoke.json`** (second gate; mock provider always accepts).
 
-After a run, optional second gate: **`pnpm exec lookout verify-run`** (uses the configured LLM to output `accept` / `reject` from the export bundle; exit 1 on reject; mock provider always accepts).
+---
 
-Emit Playwright specs from a **specific** run id: **`pnpm exec lookout runs emit-playwright <runId> --out <dir>`** (same emitter as `generate-tests`; only **complete** goals become files).
+## Golden path & trust
 
-## Trust: compare runs and export bundles
+- **Retries / flake:** `--retries`, `flake_suspected`, `--strict-retry` — full semantics in [`docs/LAUNCH_REVIEW.md`](docs/LAUNCH_REVIEW.md).
+- **Compare runs:** `lookout runs list`, `runs diff`, `runs export` — fingerprinted issues, bundle v2 for sharing or automation.
+- **MCP:** `pnpm exec lookout-mcp` after `pnpm build`, or `packages/mcp-server/dist/main.js` with a project that has `.lookout/`.
 
-After any run, `.lookout` holds history. From the project root:
-
-```bash
-pnpm exec lookout runs list
-pnpm exec lookout runs list --json
-pnpm exec lookout runs diff <runIdA> <runIdB>
-pnpm exec lookout runs diff <runIdA> <runIdB> --json
-pnpm exec lookout runs export <runId> --out run-bundle.json
-```
-
-`runs diff` groups issues by a stable fingerprint (`severity`, `category`, `title`) so you can see what changed between two runs (for example main vs a PR). `runs export` writes **bundle v2**: run row, goals, per-goal step summaries (`actionKind`, verdicts, screenshot/a11y paths), issues, `report.html` path, and any `trace*.zip` paths under that run directory.
-
-## MCP server
-
-The `@lookout/mcp-server` package exposes stdio tools: `lookout_list_runs`, `lookout_list_issues`, **`lookout_diff_runs`**, and **`lookout_export_run`** (same diff/export semantics as the CLI) for Cursor and other MCP clients. After `pnpm build`, run `pnpm exec lookout-mcp` from the repo root (binary `lookout-mcp` in that package), or point your MCP server command at `packages/mcp-server/dist/main.js` with working directory set to a project that contains `.lookout`.
-
-Set **`LOOKOUT_MCP_ROOT`** to an absolute workspace parent (e.g. `/home/me/repos`) so MCP tool `cwd` arguments cannot escape outside that directory. See **`SECURITY.md`**.
+---
 
 ## Development
 
@@ -67,14 +78,15 @@ pnpm build
 pnpm lint
 pnpm test
 pnpm run test:eval
+pnpm run prove          # optional: end-to-end smoke + MCP proof
 ```
 
-Run **`pnpm build`** before lint and tests so workspace packages expose **`dist/*.d.ts`** (required for type-aware ESLint and for Vitest resolving `@lookout/*` entries). `pnpm run test:eval` runs a small fast subset (judge JSON parsing, issue diff, export bundle). For a human launch pass, see **`docs/LAUNCH_REVIEW.md`**.
+`pnpm build` before lint/tests so workspace `dist/*.d.ts` resolves for ESLint and Vitest.
 
-Browser-backed tests in `@lookout/core` are skipped automatically when Playwright’s Chromium binary is not installed (`pnpm run playwright:install`).
+---
 
 ## License and contributing
 
-MIT — see [`LICENSE`](LICENSE). For PRs and local checks, see [`CONTRIBUTING.md`](CONTRIBUTING.md). Security disclosures: [`SECURITY.md`](SECURITY.md).
+MIT — [`LICENSE`](LICENSE). PRs: [`CONTRIBUTING.md`](CONTRIBUTING.md). Security: [`SECURITY.md`](SECURITY.md). History: [`CHANGELOG.md`](CHANGELOG.md).
 
 Canonical repo: [github.com/OrionsLock/LookOut](https://github.com/OrionsLock/LookOut).
