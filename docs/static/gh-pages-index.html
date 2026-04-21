@@ -8,14 +8,20 @@
   <body>
     <h1>LookOut</h1>
     <p>
-      Published from CI: mock LLM smoke against <code>examples/nextjs-demo</code>. The
-      <a href="latest/bundle.json">export bundle (JSON v2)</a> is the portable, diff-friendly record of the agent run
-      (goals, steps, issues, artifact paths).
+      Published from GitHub Actions. Prefer the <strong>curated</strong> walkthrough (real axe / a11y signal) for sharing;
+      <code>latest/</code> is the plain CI smoke output and <strong>changes on every deploy</strong>.
     </p>
+    <h2>Curated (recommended for README / social)</h2>
     <ul>
-      <li><a href="latest/report.html"><strong>Latest</strong> HTML report</a></li>
-      <li><a href="latest/bundle.json"><strong>Latest</strong> run export bundle</a></li>
+      <li><a href="examples/find-the-bug/report.html">HTML report</a></li>
+      <li><a href="examples/find-the-bug/bundle.json">Export bundle (JSON v2)</a></li>
     </ul>
-    <p>Versioned paths: <code>/v0.5.0/report.html</code> (one directory per release tag).</p>
+    <h2>CI smoke (<code>latest/</code> — moving target)</h2>
+    <ul>
+      <li><a href="latest/report.html">Latest smoke report</a></li>
+      <li><a href="latest/bundle.json">Latest smoke bundle</a></li>
+    </ul>
+    <h2>Versioned smoke (immutable per git tag)</h2>
+    <p>Example: <a href="v0.5.1/report.html">v0.5.1/report.html</a> (one directory per release tag).</p>
   </body>
 </html>

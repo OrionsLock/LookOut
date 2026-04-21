@@ -1,0 +1,20 @@
+{
+  "baseUrl": "http://127.0.0.1:3000",
+  "auth": { "type": "none" },
+  "llm": {
+    "provider": "mock",
+    "model": "mock",
+    "vision": false,
+    "maxTokens": 256
+  },
+  "crawl": {
+    "maxStepsPerGoal": 8,
+    "maxParallelAgents": 1,
+    "goals": [{ "id": "showcase-a11y", "prompt": "123456789012 visit the demo a11y bug page and finish the goal" }]
+  },
+  "checks": {
+    "a11y": { "enabled": true, "failOn": "moderate" }
+  },
+  "emitters": {},
+  "report": { "format": ["html"], "openAfterRun": false, "traceOnFailure": false }
+}

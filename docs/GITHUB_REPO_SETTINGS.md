@@ -41,8 +41,8 @@ Then **Releases → Draft a new release**: choose tag `v0.5.0`, title `LookOut 0
 
 Even a minimal release with three bullets signals “maintained” more than an empty Releases tab.
 
-## GitHub Pages (smoke report + bundle)
+## GitHub Pages (smoke + curated report + bundle)
 
-After **`gh-pages`** exists (first run of [`pages-smoke-artifacts.yml`](../.github/workflows/pages-smoke-artifacts.yml)), enable **Settings → Pages** as described in [`GITHUB_PAGES.md`](GITHUB_PAGES.md).
+After **`gh-pages`** exists (first run of [`pages-smoke-artifacts.yml`](../.github/workflows/pages-smoke-artifacts.yml)), enable **Settings → Pages** as described in [`GITHUB_PAGES.md`](GITHUB_PAGES.md). The **`/examples/find-the-bug/`** path is the curated public demo; **`/latest/`** is CI smoke only.
 
 Optional: custom domain **`examples.orionslock.com`** → CNAME to **`orionslock.github.io`** (see that doc).

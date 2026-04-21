@@ -1,9 +1,11 @@
-# Publishes the nextjs-demo smoke run to GitHub Pages (gh-pages branch):
-#   /<tag>/report.html + bundle.json   (immutable per release tag)
-#   /latest/...                         (alias; updated on each tag push)
-#   /index.html                         (landing with links)
+# Publishes smoke + curated showcase runs to GitHub Pages (gh-pages branch):
+#   /<tag>/…           — CI smoke (immutable per tag)
+#   /latest/…          — same smoke, overwritten each tag push
+#   /examples/find-the-bug/… — curated run (unnamed button → axe / a11y issues; overwritten each deploy)
+#   /index.html        — landing
 #
-# Enable Pages: Settings → Pages → Build from branch → gh-pages / (root).
+# Enable Pages: Settings → Pages → Deploy from branch → gh-pages / (root).
+# See docs/GITHUB_PAGES.md (curl verify, stable vs moving URLs, raw HTML caveat).
 name: Pages — smoke report + bundle
 
 on:
@@ -32,9 +34,13 @@ jobs:
       - run: pnpm install
       - run: pnpm run playwright:install
       - run: pnpm build
-      - name: Smoke (mock LLM + Next.js demo)
+      - name: Build demo, run smoke + curated showcase, stage, deploy
+        env:
+          LOOKOUT_MOCK_ACTIONS: >-
+            [{"kind":"navigate","url":"http://127.0.0.1:3000/demo-a11y-bug","intent":"Open intentional a11y demo"},{"kind":"complete","reason":"showcase: axe runs after navigate; expect a11y issues in the bundle"}]
         run: |
           set -e
+          DEMO="examples/nextjs-demo"
           pnpm --filter nextjs-demo build
           pnpm --filter nextjs-demo start &
           NEXT_PID=$!
@@ -43,36 +49,44 @@ jobs:
             sleep 1
           done
           curl -sf "http://127.0.0.1:3000" >/dev/null
-          pnpm exec lookout ci -C examples/nextjs-demo --config lookout.smoke.json
+
+          pnpm exec lookout ci -C "$DEMO" --config lookout.smoke.json
+          SMOKE_ID=$(pnpm exec lookout runs list -C "$DEMO" --json | jq -r '.runs[0].id')
+
+          set +e
+          pnpm exec lookout ci -C "$DEMO" --config lookout.showcase.json
+          set -e
+          SHOWCASE_ID=$(pnpm exec lookout runs list -C "$DEMO" --json | jq -r '.runs[0].id')
+
+          test -n "$SMOKE_ID" && test "$SMOKE_ID" != "null"
+          test -n "$SHOWCASE_ID" && test "$SHOWCASE_ID" != "null"
+          test -f "$DEMO/.lookout/runs/$SMOKE_ID/report.html"
+          test -f "$DEMO/.lookout/runs/$SHOWCASE_ID/report.html"
+
           kill "$NEXT_PID" || true
           wait "$NEXT_PID" 2>/dev/null || true
-      - name: Stage Pages (versioned + latest + index)
-        run: |
-          set -e
-          DEMO="examples/nextjs-demo"
-          RUN_ID=$(pnpm exec lookout runs list -C "$DEMO" --json | jq -r '.runs[0].id')
-          test -n "$RUN_ID" && test "$RUN_ID" != "null"
-          RUN_DIR="$DEMO/.lookout/runs/$RUN_ID"
-          test -f "$RUN_DIR/report.html"
 
           rm -rf _publish
           mkdir -p _publish
           touch _publish/.nojekyll
           cp docs/static/gh-pages-index.html _publish/index.html
 
-          stage_one() {
-            DEST="$1"
+          stage_run() {
+            RUN_ID="$1"
+            DEST="$2"
             mkdir -p "$DEST"
-            cp -a "$RUN_DIR/." "$DEST/"
+            cp -a "$DEMO/.lookout/runs/$RUN_ID/." "$DEST/"
             pnpm exec lookout runs export "$RUN_ID" --out "$(pwd)/$DEST/bundle.json" -C "$DEMO"
           }
 
+          stage_run "$SHOWCASE_ID" _publish/examples/find-the-bug
+
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            stage_one _publish/latest
+            stage_run "$SMOKE_ID" _publish/latest
           else
             TAG="${GITHUB_REF_NAME}"
             mkdir -p "_publish/$TAG" _publish/latest
-            stage_one "_publish/$TAG"
+            stage_run "$SMOKE_ID" "_publish/$TAG"
             cp -a "_publish/$TAG/." _publish/latest/
           fi
       - name: Deploy to gh-pages
