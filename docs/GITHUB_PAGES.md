@@ -19,6 +19,18 @@ The workflow **[`.github/workflows/pages-smoke-artifacts.yml`](../.github/workfl
 
 First load can take a minute after the workflow finishes.
 
+## Troubleshooting: `github.io` returns 404
+
+The workflow only **writes the `gh-pages` branch**; GitHub still will not serve **`https://orionslock.github.io/LookOut/...`** until **Settings → Pages** uses that branch (see above). A successful workflow run with a 404 site almost always means **Pages is still on “None”** or pointed at **`main` / `/docs`** instead of **`gh-pages` / (root)**.
+
+**Sanity check — files are on the branch:**
+
+- Tree: `https://github.com/OrionsLock/LookOut/tree/gh-pages/latest`
+- Raw HTML (view source / download): `https://raw.githubusercontent.com/OrionsLock/LookOut/gh-pages/latest/report.html`
+- Raw bundle: `https://raw.githubusercontent.com/OrionsLock/LookOut/gh-pages/latest/bundle.json`
+
+After fixing the Pages source, wait **1–10 minutes** for the CDN, then hard-refresh.
+
 ## README links (project Pages URL)
 
 Default GitHub project URL:

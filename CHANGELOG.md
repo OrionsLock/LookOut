@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Docs**: **`GITHUB_PAGES.md`** — 404 troubleshooting + raw/`tree` links when `github.io` is not wired; README live-artifact links include **`gh-pages` tree + raw** fallbacks.
 - **Docs**: README — honest preview mockup labeling, asciinema-first demo guidance (ideal capture described in HTML comment), GitHub Pages links for **latest report + bundle**; **`docs/GITHUB_PAGES.md`** + **`docs/static/gh-pages-index.html`**; **`docs/GITHUB_REPO_SETTINGS.md`** links Pages setup.
 - **CI**: **`pages-smoke-artifacts`** workflow publishes smoke **`report.html`** (full run dir for relative assets) + **`runs export`** bundle to **`gh-pages`** on **`v*`** tags (and **`latest/`** alias); **`workflow_dispatch`** refreshes **`latest/`** only.
 - **Docs (earlier)**: README reframed around thesis + differentiators + visual preview; **`docs/GITHUB_REPO_SETTINGS.md`** for description / website / topics / social preview / **`v0.5.0`** release checklist; **`docs/assets/github-social-preview.png`** (1280×640) for GitHub social upload and README hero.
