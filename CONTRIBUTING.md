@@ -28,6 +28,19 @@ In another terminal:
 pnpm exec lookout ci -C examples/nextjs-demo --config lookout.smoke.json
 ```
 
+One-shot parity (builds the demo, runs `lookout ci`, **`lookout verify-run`**, then MCP stdio + **`LOOKOUT_MCP_ROOT`** checks):
+
+```bash
+pnpm build
+pnpm run prove
+```
+
+Optional **live** judge calls (real APIs or local Ollama; may incur cost). Set **`LOOKOUT_LIVE_JUDGE=1`** and the provider key you want to exercise, then:
+
+```bash
+pnpm vitest run packages/llm/src/judge-run.live.test.ts
+```
+
 See **`docs/LAUNCH_REVIEW.md`** for trust semantics (retries, strict mode, judge).
 
 ## Code style

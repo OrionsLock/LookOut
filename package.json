@@ -24,7 +24,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
-    "playwright:install": "pnpm --filter @lookout/core exec playwright install --with-deps chromium"
+    "playwright:install": "pnpm --filter @lookout/core exec playwright install --with-deps chromium",
+    "prove": "node scripts/prove-lookout.mjs"
   },
   "devDependencies": {
     "@lookout/cli": "workspace:*",
