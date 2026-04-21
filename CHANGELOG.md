@@ -19,6 +19,7 @@
 - `lookout verify-run` — LLM-as-judge (`accept`/`reject`) over export bundle v2; `lookout runs emit-playwright <runId> --out <dir>`; shared `emitAuthFromConfig` for emitter auth
 - `pnpm run test:eval` and **`docs/LAUNCH_REVIEW.md`** pre-launch checklist
 - Root **`vitest.config.ts`** with **`test.projects`** (`packages/*/vitest.config.ts`); per-package configs use **`defineProject`** (replaces deprecated `vitest.workspace.ts`)
+- Workspace packages: **`exports.types`** before **`import`/`require`** in `package.json` (Node resolution + cleaner Vite/esbuild resolution)
 
 ## 0.4.0 — UX Audit & Multi-Provider LLM
 
