@@ -1,0 +1,57 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Redact any credentials, hostnames,
+        or run contents that shouldn't leave your environment before submitting.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Include the exact command, any stderr lines, and the expected behaviour.
+      placeholder: |
+        I ran `lookout ci --config lookout.config.ts` and …
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Steps, configs, or a small repo that triggers the issue.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Lookout version
+      placeholder: "0.5.0"
+    validations:
+      required: true
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      placeholder: "v20.18.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / run report
+      description: Paste stderr lines, or link a report.html. Please redact secrets first.
+      render: shell

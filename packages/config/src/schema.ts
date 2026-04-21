@@ -6,11 +6,14 @@ const AuthSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("credentials"),
-    loginUrl: z.string(),
+    // Accepts a path ("/login") or absolute URL; when absolute, the
+    // orchestrator enforces that it matches the baseUrl origin so credentials
+    // can't be posted to an unrelated host from config drift.
+    loginUrl: z.string().min(1).max(2048),
     usernameSelector: z.string(),
     passwordSelector: z.string(),
     submitSelector: z.string(),
-    successUrlPattern: z.string().optional(),
+    successUrlPattern: z.string().max(512).optional(),
     username: z.string().min(1),
     password: z.string().min(1),
   }),
@@ -64,7 +67,10 @@ const ChecksSchema = z
       .default({ failOn: ["error"] }),
     network: z
       .object({
-        failOn: z.array(z.string()).default(["^5\\d\\d$", "^4\\d\\d$"]),
+        // Cap each pattern to protect against accidental ReDoS from config —
+        // typical patterns are short (e.g. "^5\d\d$"), and a 256-char ceiling
+        // is generous for any realistic status-code regex.
+        failOn: z.array(z.string().max(256)).max(32).default(["^5\\d\\d$", "^4\\d\\d$"]),
       })
       .default({ failOn: ["^5\\d\\d$", "^4\\d\\d$"] }),
     performance: z
@@ -72,6 +78,19 @@ const ChecksSchema = z
         enabled: z.boolean().default(false),
       })
       .default({ enabled: false }),
+    /**
+     * Controls which origins the explorer may navigate to mid-run. Defaults to
+     * "same-origin" (the origin of baseUrl) to prevent an LLM-planned navigate
+     * from being coerced into SSRF'ing an arbitrary target. Use "any" to opt
+     * back into unrestricted navigation, or pass an explicit origin list.
+     */
+    navigate: z
+      .object({
+        allowedOrigins: z
+          .union([z.literal("same-origin"), z.literal("any"), z.array(z.string().url()).max(32)])
+          .default("same-origin"),
+      })
+      .default({ allowedOrigins: "same-origin" }),
   })
   .default({} as never);
 

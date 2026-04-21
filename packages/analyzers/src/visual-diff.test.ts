@@ -31,4 +31,27 @@ describe("visualDiff", () => {
     expect(r.diffRatio).toBeGreaterThan(0);
     expect(r.exceedsThreshold).toBe(true);
   });
+
+  it("different sized images are compared on intersection and count extras as diffs", () => {
+    // Identical top-left 10x10 area, but "b" is bigger; the extra pixels
+    // must count as diff so a resized viewport never silently passes.
+    const a = solidPng(10, 10, [10, 20, 30]);
+    const b = solidPng(12, 12, [10, 20, 30]);
+    const r = visualDiff(a, b, 0);
+    expect(r.width).toBe(10);
+    expect(r.height).toBe(10);
+    expect(r.diffRatio).toBeGreaterThan(0);
+    expect(r.exceedsThreshold).toBe(true);
+  });
+
+  it("counts the whole union as different when one image is drastically smaller", () => {
+    // A 1x1 image vs a 10x10 image has union=100, intersection=1, so up to
+    // 99 extra pixels must count as diffs even if the overlapping pixel
+    // happens to match exactly.
+    const tiny = solidPng(1, 1, [0, 0, 0]);
+    const big = solidPng(10, 10, [0, 0, 0]);
+    const r = visualDiff(tiny, big, 0.5);
+    expect(r.diffRatio).toBeGreaterThan(0.9);
+    expect(r.exceedsThreshold).toBe(true);
+  });
 });

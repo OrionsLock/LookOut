@@ -15,7 +15,7 @@ export class PerMinuteLimiter {
       this.times.push(Date.now());
       return;
     }
-    const oldest = this.times[0]!;
+    const oldest = this.times[0] ?? now;
     const wait = Math.max(0, 60_000 - (Date.now() - oldest));
     await new Promise<void>((resolve) => setTimeout(resolve, wait));
     return this.acquire();

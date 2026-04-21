@@ -51,6 +51,18 @@ export type OrchestratorError =
   | { kind: "config_invalid"; detail: string };
 
 function tryGitSha(): string | undefined {
+  // CI systems already expose the commit in the environment — trust those
+  // before spawning git, which may not be on PATH and can add perceptible
+  // latency on cold starts (especially Windows).
+  const envSha =
+    process.env["GITHUB_SHA"] ??
+    process.env["CI_COMMIT_SHA"] ??
+    process.env["BUILDKITE_COMMIT"] ??
+    process.env["BUILD_SOURCEVERSION"] ??
+    null;
+  if (envSha && /^[0-9a-f]{7,64}$/i.test(envSha.trim())) {
+    return envSha.trim();
+  }
   try {
     return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   } catch {
@@ -66,7 +78,31 @@ async function performCredentialsAuth(
   if (config.auth.type !== "credentials") return ok(undefined);
   const auth = config.auth;
   const page = await context.newPage();
-  const loginUrl = new URL(auth.loginUrl, config.baseUrl).toString();
+  let resolvedLoginUrl: URL;
+  try {
+    resolvedLoginUrl = new URL(auth.loginUrl, config.baseUrl);
+  } catch {
+    await page.close();
+    return err({ kind: "auth_failed", detail: `invalid loginUrl: ${auth.loginUrl}` });
+  }
+  if (resolvedLoginUrl.protocol !== "http:" && resolvedLoginUrl.protocol !== "https:") {
+    await page.close();
+    return err({
+      kind: "auth_failed",
+      detail: `loginUrl protocol not allowed: ${resolvedLoginUrl.protocol}`,
+    });
+  }
+  // Credentials must never be posted to a host other than baseUrl — stop
+  // a misconfigured absolute loginUrl from leaking passwords cross-origin.
+  const baseOrigin = new URL(config.baseUrl).origin;
+  if (resolvedLoginUrl.origin !== baseOrigin) {
+    await page.close();
+    return err({
+      kind: "auth_failed",
+      detail: `loginUrl origin (${resolvedLoginUrl.origin}) does not match baseUrl (${baseOrigin})`,
+    });
+  }
+  const loginUrl = resolvedLoginUrl.toString();
   try {
     await page.goto(loginUrl, { waitUntil: "domcontentloaded", timeout: 15_000 });
     await page.locator(auth.usernameSelector).fill(auth.username);
@@ -180,7 +216,11 @@ export function createOrchestrator(opts: OrchestratorOpts): Orchestrator {
 
         const traceOn = config.report.traceOnFailure;
 
-        const runSingleGoal = async (goal: Goal) => {
+        // The explorer is the single owner of goal status/endedAt: it writes
+        // the final status (complete/stuck/error) as soon as it knows. The
+        // orchestrator only seeds `running`/`startedAt` and catches thrown
+        // errors so one goal can't abort the whole run.
+        const runSingleGoal = async (goal: Goal): Promise<ExplorerResult> => {
           if (!browser) throw new Error("orchestrator: browser not initialized");
           await store.updateGoal(goal.id, { status: "running", startedAt: Date.now() });
           const ctxOpts: BrowserContextOptions = { viewport };
@@ -198,10 +238,26 @@ export function createOrchestrator(opts: OrchestratorOpts): Orchestrator {
               llm,
               store,
               checks: config.checks,
+              baseUrl: config.baseUrl,
               logger: log.child({ goalId: goal.id, component: "explorer" }),
             });
             res = await explorer.run();
             await page.close();
+          } catch (e) {
+            log.error({ err: e, goalId: goal.id }, "goal_crashed");
+            await store.updateGoal(goal.id, {
+              status: "error",
+              endedAt: Date.now(),
+            });
+            await store.recordIssue({
+              runId: run.id,
+              stepId: null,
+              severity: "major",
+              category: "flow",
+              title: "Goal crashed",
+              detail: { goalId: goal.id, error: e instanceof Error ? e.message : String(e) },
+            });
+            res = { goalId: goal.id, status: "error", stepsTaken: 0 };
           } finally {
             if (traceOn) {
               const dir = path.join(store.rootDir, "runs", run.id);
@@ -212,14 +268,7 @@ export function createOrchestrator(opts: OrchestratorOpts): Orchestrator {
             }
             await context.close();
           }
-          const status =
-            res?.status === "complete"
-              ? ("complete" as const)
-              : res?.status === "stuck"
-                ? ("stuck" as const)
-                : ("error" as const);
-          await store.updateGoal(goal.id, { status, endedAt: Date.now(), stepsTaken: res?.stepsTaken ?? 0 });
-          return res ?? { goalId: goal.id, status: "error", stepsTaken: 0 };
+          return res;
         };
 
         if (concurrency <= 1) {
@@ -231,27 +280,37 @@ export function createOrchestrator(opts: OrchestratorOpts): Orchestrator {
           try {
             for (const goal of orderedGoals) {
               await store.updateGoal(goal.id, { status: "running", startedAt: Date.now() });
+              let res: ExplorerResult | undefined;
               const page = await context.newPage();
-              await page.goto(config.baseUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
-              const explorer = createExplorer({
-                page,
-                goal,
-                budget: config.crawl.maxStepsPerGoal,
-                llm,
-                store,
-                checks: config.checks,
-                logger: log.child({ goalId: goal.id }),
-              });
-              const res = await explorer.run();
+              try {
+                await page.goto(config.baseUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+                const explorer = createExplorer({
+                  page,
+                  goal,
+                  budget: config.crawl.maxStepsPerGoal,
+                  llm,
+                  store,
+                  checks: config.checks,
+                  baseUrl: config.baseUrl,
+                  logger: log.child({ goalId: goal.id }),
+                });
+                res = await explorer.run();
+              } catch (e) {
+                log.error({ err: e, goalId: goal.id }, "goal_crashed");
+                await store.updateGoal(goal.id, { status: "error", endedAt: Date.now() });
+                await store.recordIssue({
+                  runId: run.id,
+                  stepId: null,
+                  severity: "major",
+                  category: "flow",
+                  title: "Goal crashed",
+                  detail: { goalId: goal.id, error: e instanceof Error ? e.message : String(e) },
+                });
+                res = { goalId: goal.id, status: "error", stepsTaken: 0 };
+              } finally {
+                await page.close().catch(() => undefined);
+              }
               if (res.status !== "complete") anyGoalBad = true;
-              await page.close();
-              const status =
-                res.status === "complete"
-                  ? ("complete" as const)
-                  : res.status === "stuck"
-                    ? ("stuck" as const)
-                    : ("error" as const);
-              await store.updateGoal(goal.id, { status, endedAt: Date.now(), stepsTaken: res.stepsTaken });
             }
           } finally {
             if (traceOn) {

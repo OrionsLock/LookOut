@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { chromium } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -14,7 +15,7 @@ const chromiumReady = existsSync(chromium.executablePath());
 const describeIntegration = chromiumReady ? describe : describe.skip;
 
 describeIntegration("createOrchestrator (integration)", () => {
-  const tmp = path.join(process.cwd(), `orch-int-${Date.now()}`);
+  const tmp = path.join(os.tmpdir(), `orch-int-${Date.now()}`);
   let baseUrl = "";
   let server: ReturnType<typeof createServer>;
 

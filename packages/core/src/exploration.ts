@@ -19,11 +19,17 @@ export async function recordExplorationIssues(
   }
 
   const seen = new Set<string>();
+  // Track queued URLs in a Set alongside the FIFO array so membership
+  // checks are O(1) — the original `queue.includes(next)` made the whole
+  // crawl O(N^2) as the discovered set grew.
+  const queued = new Set<string>();
   const queue: string[] = [startUrl];
+  queued.add(startUrl);
 
   while (queue.length > 0 && seen.size < budget) {
     const url = queue.shift();
     if (url === undefined) break;
+    queued.delete(url);
     if (seen.has(url)) continue;
     seen.add(url);
 
@@ -67,7 +73,10 @@ export async function recordExplorationIssues(
         continue;
       }
       if (new URL(next).origin !== origin) continue;
-      if (!seen.has(next) && !queue.includes(next)) queue.push(next);
+      if (!seen.has(next) && !queued.has(next)) {
+        queue.push(next);
+        queued.add(next);
+      }
     }
   }
 }

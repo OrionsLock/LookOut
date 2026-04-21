@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import { ulid } from "ulid";
 import type { A11ySnapshot, Goal, Issue, Run, Step } from "@lookout/types";
 import { ActionSchema, err, ok, type Result } from "@lookout/types";
+import { runMigrations } from "./migrations.js";
 
 export type Baseline = {
   urlHash: string;
@@ -164,60 +165,8 @@ class SqliteStore implements Store {
     }
     try {
       this.db.pragma("journal_mode = WAL");
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS runs (
-          id TEXT PRIMARY KEY,
-          started_at INTEGER NOT NULL,
-          ended_at INTEGER,
-          base_url TEXT NOT NULL,
-          commit_sha TEXT,
-          verdict TEXT NOT NULL,
-          summary_json TEXT
-        );
-        CREATE TABLE IF NOT EXISTS goals (
-          id TEXT PRIMARY KEY,
-          run_id TEXT NOT NULL REFERENCES runs(id),
-          prompt TEXT NOT NULL,
-          status TEXT NOT NULL,
-          steps_taken INTEGER NOT NULL DEFAULT 0,
-          started_at INTEGER,
-          ended_at INTEGER
-        );
-        CREATE TABLE IF NOT EXISTS steps (
-          id TEXT PRIMARY KEY,
-          goal_id TEXT NOT NULL REFERENCES goals(id),
-          idx INTEGER NOT NULL,
-          url TEXT NOT NULL,
-          action_json TEXT NOT NULL,
-          selector_resolved TEXT,
-          screenshot_before TEXT,
-          screenshot_after TEXT,
-          a11y_tree_path TEXT,
-          verdict TEXT NOT NULL,
-          duration_ms INTEGER NOT NULL,
-          created_at INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS issues (
-          id TEXT PRIMARY KEY,
-          run_id TEXT NOT NULL REFERENCES runs(id),
-          step_id TEXT,
-          severity TEXT NOT NULL,
-          category TEXT NOT NULL,
-          title TEXT NOT NULL,
-          detail_json TEXT NOT NULL,
-          created_at INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS baselines (
-          url_hash TEXT PRIMARY KEY,
-          url TEXT NOT NULL,
-          screenshot_path TEXT NOT NULL,
-          run_id TEXT NOT NULL REFERENCES runs(id),
-          created_at INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_steps_goal ON steps(goal_id, idx);
-        CREATE INDEX IF NOT EXISTS idx_issues_run ON issues(run_id, severity);
-        CREATE INDEX IF NOT EXISTS idx_goals_run ON goals(run_id);
-      `);
+      this.db.pragma("foreign_keys = ON");
+      runMigrations(this.db);
     } catch (e) {
       this.db.close();
       this.db = null;
@@ -295,7 +244,9 @@ class SqliteStore implements Store {
 
   async listRuns(opts?: { limit?: number }): Promise<Run[]> {
     const db = this.requireDb();
-    const limit = opts?.limit ?? 50;
+    // Clamp to a sane maximum so hostile MCP clients can't ask for the moon.
+    const requested = opts?.limit ?? 50;
+    const limit = Math.max(1, Math.min(Number.isFinite(requested) ? Math.floor(requested) : 50, 1000));
     const rows = db
       .prepare(`SELECT * FROM runs ORDER BY started_at DESC LIMIT ?`)
       .all(limit) as Array<{
@@ -415,23 +366,33 @@ class SqliteStore implements Store {
     const db = this.requireDb();
     const id = ulid();
     const createdAt = Date.now();
-    db.prepare(
-      `INSERT INTO steps (id, goal_id, idx, url, action_json, selector_resolved, screenshot_before, screenshot_after, a11y_tree_path, verdict, duration_ms, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      id,
-      input.goalId,
-      input.idx,
-      input.url,
-      JSON.stringify(input.action),
-      input.selectorResolved,
-      input.screenshotBefore,
-      input.screenshotAfter,
-      input.a11yTreePath,
-      input.verdict,
-      input.durationMs,
-      createdAt,
-    );
+    try {
+      db.prepare(
+        `INSERT INTO steps (id, goal_id, idx, url, action_json, selector_resolved, screenshot_before, screenshot_after, a11y_tree_path, verdict, duration_ms, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        id,
+        input.goalId,
+        input.idx,
+        input.url,
+        JSON.stringify(input.action),
+        input.selectorResolved,
+        input.screenshotBefore,
+        input.screenshotAfter,
+        input.a11yTreePath,
+        input.verdict,
+        input.durationMs,
+        createdAt,
+      );
+    } catch (e) {
+      // Surface a clear, typed error when the unique (goal_id, idx) index
+      // trips instead of a generic SqliteError bubbling through the stack.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/UNIQUE constraint failed: steps\.?goal_id/.test(msg) || msg.includes("uq_steps_goal_idx")) {
+        throw new Error(`duplicate_step: goal=${input.goalId} idx=${input.idx}`);
+      }
+      throw e;
+    }
     return { ...input, id, createdAt };
   }
 
@@ -521,10 +482,17 @@ class SqliteStore implements Store {
   }
 
   async getScreenshot(runId: string, relPath: string): Promise<Buffer> {
-    const normalized = relPath.replaceAll("\\", "/");
-    if (normalized.includes("..")) throw new Error("invalid_path");
-    const full = path.join(this.rootDir, normalized);
-    if (!full.startsWith(path.join(this.rootDir, "runs", runId))) {
+    // Validate runId so it can't escape via ".." segments.
+    if (!runId || runId.includes("/") || runId.includes("\\") || runId.includes("..")) {
+      throw new Error("invalid_path");
+    }
+    // Resolve under the store root, then ensure the final path sits under
+    // runs/<runId>/. Using path.relative avoids prefix-matching pitfalls
+    // (e.g. "runs/abcd" would naively match "runs/abc").
+    const full = resolvePathUnderStoreRoot(this.rootDir, relPath);
+    const runDir = path.resolve(path.join(this.rootDir, "runs", runId));
+    const rel = path.relative(runDir, full);
+    if (rel.startsWith("..") || path.isAbsolute(rel)) {
       throw new Error("invalid_path");
     }
     return readFile(full);
@@ -623,6 +591,7 @@ export async function readA11ySnapshotFromStore(
   return JSON.parse(json) as A11ySnapshot;
 }
 
+export { listKnownMigrations, runMigrations } from "./migrations.js";
 export { diffIssuesByFingerprint, issueFingerprint, type IssuesDiff } from "./issue-diff.js";
 export {
   buildRunExportBundle,

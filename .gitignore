@@ -10,3 +10,5 @@ out
 .env
 .env.*
 !.env.example
+orch-int-*/
+

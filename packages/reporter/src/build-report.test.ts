@@ -53,4 +53,39 @@ describe("buildReport", () => {
     expect(document.querySelector("#goal-g1")).toBeTruthy();
     expect(document.querySelector("#step-s1")).toBeTruthy();
   });
+
+  it("escapes HTML specials including apostrophe and angle brackets", () => {
+    const data: ReportData = {
+      run: {
+        id: "run-xss",
+        startedAt: 1,
+        endedAt: 2,
+        baseUrl: "http://localhost:3000",
+        commitSha: null,
+        verdict: "clean",
+        summary: null,
+      },
+      goals: [
+        {
+          id: "g1",
+          runId: "run-xss",
+          prompt: `user's payload <script>alert("x")</script>`,
+          status: "complete",
+          stepsTaken: 0,
+          startedAt: 1,
+          endedAt: 2,
+          steps: [],
+          issues: [],
+        },
+      ],
+      issues: [],
+      pages: [],
+    };
+    const html = buildReport(data);
+    // The dangerous characters must not appear unescaped outside of their
+    // entity form.
+    expect(html).not.toMatch(/<script>alert\("x"\)<\/script>/);
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).toContain("&#39;"); // the apostrophe in "user's"
+  });
 });

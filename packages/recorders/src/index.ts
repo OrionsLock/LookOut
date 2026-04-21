@@ -124,14 +124,16 @@ export interface NetworkRecorder extends Recorder<NetworkEntry[]> {
 
 export function createNetworkRecorder(): NetworkRecorder {
   const buf: NetworkEntry[] = [];
+  let page: Page | null = null;
 
-  return {
-    name: "network",
-    async start(p: Page) {
-      p.on("request", (req) => {
-        const started = Date.now();
-        req.response()
-          .then((res) => {
+  // Keep listeners as named functions so stop() can detach them. Without
+  // this, reusing the recorder (e.g. across goals on the same page) would
+  // accumulate listeners and leak memory on long runs.
+  const onRequest = (req: import("playwright").Request) => {
+    const started = Date.now();
+    req
+      .response()
+      .then((res) => {
         buf.push({
           url: req.url(),
           method: req.method(),
@@ -145,24 +147,8 @@ export function createNetworkRecorder(): NetworkRecorder {
           failureText: undefined,
           at: Date.now(),
         });
-          })
-          .catch(() => {
-            buf.push({
-              url: req.url(),
-              method: req.method(),
-              resourceType: req.resourceType(),
-              requestHeaders: req.headers(),
-              status: undefined,
-              statusText: undefined,
-              durationMs: undefined,
-              responseHeaders: undefined,
-              failed: true,
-              failureText: "no_response",
-              at: Date.now(),
-            });
-          });
-      });
-      p.on("requestfailed", (req) => {
+      })
+      .catch(() => {
         buf.push({
           url: req.url(),
           method: req.method(),
@@ -173,10 +159,33 @@ export function createNetworkRecorder(): NetworkRecorder {
           durationMs: undefined,
           responseHeaders: undefined,
           failed: true,
-          failureText: req.failure()?.errorText,
+          failureText: "no_response",
           at: Date.now(),
         });
       });
+  };
+  const onRequestFailed = (req: import("playwright").Request) => {
+    buf.push({
+      url: req.url(),
+      method: req.method(),
+      resourceType: req.resourceType(),
+      requestHeaders: req.headers(),
+      status: undefined,
+      statusText: undefined,
+      durationMs: undefined,
+      responseHeaders: undefined,
+      failed: true,
+      failureText: req.failure()?.errorText,
+      at: Date.now(),
+    });
+  };
+
+  return {
+    name: "network",
+    async start(p: Page) {
+      page = p;
+      p.on("request", onRequest);
+      p.on("requestfailed", onRequestFailed);
     },
     collect() {
       const out = [...buf];
@@ -184,7 +193,11 @@ export function createNetworkRecorder(): NetworkRecorder {
       return out;
     },
     async stop() {
-      /* listeners cleared with page lifecycle */
+      if (page) {
+        page.off("request", onRequest);
+        page.off("requestfailed", onRequestFailed);
+      }
+      page = null;
     },
   };
 }

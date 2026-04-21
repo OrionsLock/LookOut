@@ -20,6 +20,12 @@ export type ExplorerOpts = {
   llm: LLMClient;
   store: StoreWithRoot;
   checks: ResolvedLookoutConfig["checks"];
+  /**
+   * The run's `baseUrl`. Used to enforce the navigate origin allowlist so an
+   * LLM-planned navigate can't reach a host outside the configured scope
+   * unless the config explicitly opts in.
+   */
+  baseUrl: string;
   logger: Logger;
 };
 
@@ -74,7 +80,48 @@ async function evaluateAssert(page: Page, expectation: string): Promise<ActResul
     : { verdict: "error", selector: null, error: new Error(`assertion failed: ${t}`) };
 }
 
-async function act(page: Page, action: Action): Promise<ActResult> {
+/**
+ * Decide whether a navigate URL is allowed given the navigate-allowlist
+ * configuration. Exported for tests.
+ */
+export function isNavigateAllowed(
+  target: URL,
+  baseUrl: string,
+  allowed: ResolvedLookoutConfig["checks"]["navigate"]["allowedOrigins"],
+): boolean {
+  if (target.protocol !== "http:" && target.protocol !== "https:") return false;
+  if (allowed === "any") return true;
+  if (allowed === "same-origin") {
+    try {
+      return target.origin === new URL(baseUrl).origin;
+    } catch {
+      return false;
+    }
+  }
+  if (Array.isArray(allowed)) {
+    const origins = new Set<string>();
+    try {
+      origins.add(new URL(baseUrl).origin);
+    } catch {
+      // ignore
+    }
+    for (const entry of allowed) {
+      try {
+        origins.add(new URL(entry).origin);
+      } catch {
+        // ignore entries that aren't URLs — Zod max(32) already bounds size
+      }
+    }
+    return origins.has(target.origin);
+  }
+  return false;
+}
+
+async function act(
+  page: Page,
+  action: Action,
+  ctx: { baseUrl: string; checks: ResolvedLookoutConfig["checks"] },
+): Promise<ActResult> {
   switch (action.kind) {
     case "click": {
       const resolved = await resolveTarget(page, action.target);
@@ -109,18 +156,20 @@ async function act(page: Page, action: Action): Promise<ActResult> {
     case "navigate": {
       let u: URL;
       try {
-        u = new URL(action.url);
+        u = new URL(action.url, ctx.baseUrl);
       } catch (e) {
         return { verdict: "error", selector: null, error: e };
       }
-      if (u.protocol !== "http:" && u.protocol !== "https:") {
+      if (!isNavigateAllowed(u, ctx.baseUrl, ctx.checks.navigate.allowedOrigins)) {
         return {
           verdict: "error",
           selector: null,
-          error: new Error(`navigate blocked: only http(s) allowed, got ${u.protocol}`),
+          error: new Error(
+            `navigate blocked: ${u.origin} not in allowedOrigins (baseUrl=${ctx.baseUrl})`,
+          ),
         };
       }
-      await page.goto(action.url, { timeout: 15_000, waitUntil: "domcontentloaded" });
+      await page.goto(u.toString(), { timeout: 15_000, waitUntil: "domcontentloaded" });
       return { verdict: "ok", selector: null };
     }
     case "wait": {
@@ -151,7 +200,7 @@ export function createExplorer(opts: ExplorerOpts): Explorer {
 
   return {
     async run() {
-      const { page, goal, budget, llm, store, checks, logger } = opts;
+      const { page, goal, budget, llm, store, checks, baseUrl, logger } = opts;
       await screenshot.start(page);
       await consoleRec.start(page);
       await netRec.start(page);
@@ -171,12 +220,42 @@ export function createExplorer(opts: ExplorerOpts): Explorer {
         };
       };
 
+      // Guard against a zero or negative budget: the "exceeded step budget"
+      // message is misleading when the loop never had a chance to run.
+      if (!Number.isFinite(budget) || budget <= 0) {
+        await store.recordIssue({
+          runId: goal.runId,
+          stepId: null,
+          severity: "minor",
+          category: "flow",
+          title: "Goal skipped: budget is zero",
+          detail: { goalId: goal.id, budget },
+        });
+        await store.updateGoal(goal.id, { status: "stuck", endedAt: Date.now(), stepsTaken: 0 });
+        await screenshot.stop();
+        await consoleRec.stop();
+        await netRec.stop();
+        await a11y.stop();
+        await perf.stop();
+        return { goalId: goal.id, status: "stuck", stepsTaken: 0 };
+      }
+
       try {
         for (let idx = 0; idx < budget; idx++) {
           const perception = await perceive();
           const plan = await llm.planAction({ goal: goal.prompt, stepHistory, perception });
           if (!plan.ok) {
             logger.error({ err: plan.error }, "llm_plan_failed");
+            await store.recordIssue({
+              runId: goal.runId,
+              stepId: null,
+              severity: "major",
+              category: "flow",
+              title: "LLM plan failed",
+              // plan.error is a discriminated union; JSON.stringify keeps the
+              // `kind` and any provider-specific detail for post-mortem.
+              detail: { goalId: goal.id, idx, error: JSON.stringify(plan.error) },
+            });
             await store.updateGoal(goal.id, { status: "error", endedAt: Date.now(), stepsTaken: idx });
             return { goalId: goal.id, status: "error", stepsTaken: idx };
           }
@@ -201,7 +280,7 @@ export function createExplorer(opts: ExplorerOpts): Explorer {
 
           const beforeShot = await screenshot.capture();
           const t0 = Date.now();
-          const actResult = await act(page, action);
+          const actResult = await act(page, action, { baseUrl, checks });
           const durationMs = Date.now() - t0;
           const afterShot = await screenshot.capture();
 
@@ -240,6 +319,18 @@ export function createExplorer(opts: ExplorerOpts): Explorer {
               title: "Action failed",
               detail: { error: String(actResult.error), goalId: goal.id, idx },
             });
+          } else if (actResult.verdict === "resolution-failed") {
+            // Silently skipping this meant LLM-planned actions whose target
+            // never existed vanished from the issue tab. Surface them so
+            // users can diagnose selector / visibility problems.
+            await store.recordIssue({
+              runId: goal.runId,
+              stepId: null,
+              severity: "minor",
+              category: "flow",
+              title: "Target could not be resolved",
+              detail: { goalId: goal.id, idx, action },
+            });
           }
 
           const consoleEntries = consoleRec.collect();
@@ -257,19 +348,26 @@ export function createExplorer(opts: ExplorerOpts): Explorer {
           }
 
           const netEntries = netRec.collect();
+          // Compile once per loop; status codes are small, but re-building
+          // regex objects per entry gets expensive on chatty pages. Zod
+          // already caps length/count, but re-check here defensively.
+          const compiled: RegExp[] = [];
+          for (const p of checks.network.failOn) {
+            if (typeof p !== "string" || p.length > 256) continue;
+            try {
+              compiled.push(new RegExp(p));
+            } catch {
+              // invalid regex in config — skip pattern
+            }
+          }
           for (const n of netEntries) {
             if (!n.status) continue;
             const code = String(n.status);
-            const patterns = checks.network.failOn;
             let hit = false;
-            for (const p of patterns) {
-              try {
-                if (new RegExp(p).test(code)) {
-                  hit = true;
-                  break;
-                }
-              } catch {
-                // invalid regex in config — skip pattern
+            for (const re of compiled) {
+              if (re.test(code)) {
+                hit = true;
+                break;
               }
             }
             if (!hit) continue;

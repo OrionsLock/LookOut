@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import prettier from "prettier";
 import type { Action, Goal, Step } from "@lookout/types";
@@ -28,6 +28,27 @@ export type EmittedFile = {
   action: "written" | "skipped-existing-newer" | "overwritten";
 };
 
+/**
+ * Roles that Playwright's fill() can operate on without throwing at runtime.
+ * Anything outside this list (e.g. button, link) should fall back to a TODO
+ * comment rather than emit a spec that will fail the first time it runs.
+ */
+const FILLABLE_ROLES = new Set([
+  "textbox",
+  "searchbox",
+  "combobox",
+  "spinbutton",
+]);
+
+function selectorLooksFillable(selector: string): boolean {
+  const m = selector.match(/getByRole\(\s*["'](\w+)["']/);
+  // non-role locators (getByTestId, css, etc.) are ambiguous — allow
+  if (!m) return true;
+  const role = m[1];
+  if (role === undefined) return true;
+  return FILLABLE_ROLES.has(role);
+}
+
 function emitStepLine(action: Action, selector: string | null): string {
   if (action.kind === "navigate") {
     return `await page.goto(${JSON.stringify(action.url)});`;
@@ -45,7 +66,12 @@ function emitStepLine(action: Action, selector: string | null): string {
     return `// TODO: step skipped — no stable selector`;
   }
   if (action.kind === "click") return `await ${selector}.click();`;
-  if (action.kind === "fill") return `await ${selector}.fill(${JSON.stringify(action.value)});`;
+  if (action.kind === "fill") {
+    if (!selectorLooksFillable(selector)) {
+      return `// TODO: step skipped — resolved selector ${selector} is not a fillable role`;
+    }
+    return `await ${selector}.fill(${JSON.stringify(action.value)});`;
+  }
   if (action.kind === "select") return `await ${selector}.selectOption(${JSON.stringify(action.value)});`;
   return `// TODO: unsupported action`;
 }
@@ -80,8 +106,15 @@ export async function emitSpec(input: EmitSpecInput): Promise<string> {
   const body = input.steps
     .filter((s) => s.action.kind !== "complete" && s.action.kind !== "stuck")
     .map((s) => {
-      if (s.verdict !== "ok" || !s.selectorResolved) {
+      if (s.verdict !== "ok") {
         return `  // TODO: step ${s.idx} skipped — verdict=${s.verdict}`;
+      }
+      // navigate/assert/wait don't need a resolved selector; only skip
+      // selector-dependent actions when no selector was resolved.
+      const needsSelector =
+        s.action.kind === "click" || s.action.kind === "fill" || s.action.kind === "select";
+      if (needsSelector && !s.selectorResolved) {
+        return `  // TODO: step ${s.idx} skipped — no stable selector`;
       }
       return `  ${emitStepLine(s.action, s.selectorResolved)}`;
     })
@@ -111,6 +144,20 @@ export async function emitAll(opts: {
     if (g.status !== "complete") continue;
     const steps = await opts.store.listStepsForGoal(g.id);
     const filePath = path.join(opts.outDir, `${g.id}.spec.ts`);
+    // Detect whether the target exists up-front so we can honor the
+    // --force flag and report exactly what happened. Previously every
+    // file was labelled "written" — overwrites were invisible.
+    let existed = false;
+    try {
+      await access(filePath);
+      existed = true;
+    } catch {
+      // doesn't exist — will be "written"
+    }
+    if (existed && !opts.force) {
+      out.push({ goalId: g.id, path: filePath, action: "skipped-existing-newer" });
+      continue;
+    }
     const source = await emitSpec({
       goal: g,
       steps,
@@ -118,7 +165,11 @@ export async function emitAll(opts: {
       runMeta: { runId: opts.runId, lookoutVersion: version, generatedAt },
     });
     await writeFile(filePath, source, "utf8");
-    out.push({ goalId: g.id, path: filePath, action: opts.force ? "overwritten" : "written" });
+    out.push({
+      goalId: g.id,
+      path: filePath,
+      action: existed ? "overwritten" : "written",
+    });
   }
   return out;
 }

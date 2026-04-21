@@ -208,6 +208,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { store, cwd } = opened;
     const runId = pickString(a, "runId");
     const storeRoot = path.join(cwd, ".lookout");
+    // MCP responses go through the LLM tool-call stream; giant payloads
+    // (many-goal runs, long a11y snapshots) can blow the client context
+    // window. Cap response size and, if the serialized bundle is bigger,
+    // return a pointer rather than the raw JSON. Override with
+    // LOOKOUT_MCP_EXPORT_BYTES if you really need a bigger payload.
+    const maxBytes = Number(process.env["LOOKOUT_MCP_EXPORT_BYTES"] ?? 512 * 1024);
     try {
       const init = await store.init();
       if (!init.ok) {
@@ -217,7 +223,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (!bundle) {
         return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: "run_not_found" }) }] };
       }
-      return { content: [{ type: "text", text: JSON.stringify({ ok: true, bundle }, null, 2) }] };
+      const serialized = JSON.stringify({ ok: true, bundle }, null, 2);
+      const size = Buffer.byteLength(serialized, "utf8");
+      if (Number.isFinite(maxBytes) && maxBytes > 0 && size > maxBytes) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  ok: false,
+                  error: "export_too_large",
+                  detail: `Bundle is ${size} bytes (limit ${maxBytes}). Run \`lookout runs export ${runId}\` to write to disk, or raise LOOKOUT_MCP_EXPORT_BYTES.`,
+                  runId,
+                  sizeBytes: size,
+                  limitBytes: maxBytes,
+                  summary: {
+                    verdict: bundle.run.verdict,
+                    goals: bundle.goals.length,
+                    issues: bundle.issues.length,
+                  },
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+      return { content: [{ type: "text", text: serialized }] };
     } finally {
       store.close();
     }

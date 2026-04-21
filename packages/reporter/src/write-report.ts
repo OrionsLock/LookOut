@@ -8,6 +8,11 @@ export type WriteReportOpts = {
   store: StoreWithRoot;
   runId: string;
   outPath: string;
+  /**
+   * Reserved for future use — bundling assets (screenshots, a11y trees) into
+   * a single HTML file so the report can be shared as one artifact. Currently
+   * the report always links back to files under the store root.
+   */
   bundle?: boolean;
 };
 
@@ -57,7 +62,7 @@ async function shapeReportData(store: StoreWithRoot, runId: string): Promise<Rep
  */
 export async function writeReport(opts: WriteReportOpts): Promise<string> {
   const data = await shapeReportData(opts.store, opts.runId);
-  const html = opts.bundle ? buildReport(data) : buildReport(data);
+  const html = buildReport(data);
   await mkdir(path.dirname(opts.outPath), { recursive: true });
   await writeFile(opts.outPath, html, "utf8");
   return opts.outPath;

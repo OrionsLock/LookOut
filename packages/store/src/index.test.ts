@@ -147,4 +147,70 @@ describe("Store", () => {
     if (!init.ok) expect(init.error.kind).toBe("corrupt_db");
     store.close();
   });
+
+  it("listRuns clamps limit to a sane max", async () => {
+    const root = path.join(tmp, "r-limit");
+    const store = createStore(root);
+    expect((await store.init()).ok).toBe(true);
+    // 3 runs to prove we never return more than exist and the clamp
+    // doesn't crash with a huge input.
+    for (let i = 0; i < 3; i++) await store.createRun({ baseUrl: "http://localhost:3000/" });
+    const rows = await store.listRuns({ limit: 1_000_000 });
+    expect(rows.length).toBe(3);
+    const zero = await store.listRuns({ limit: 0 });
+    // 0 gets clamped up to 1
+    expect(zero.length).toBe(1);
+    store.close();
+  });
+
+  it("getScreenshot rejects prefix-matching attacks", async () => {
+    const root = path.join(tmp, "r-shot-sec");
+    const store = createStore(root);
+    expect((await store.init()).ok).toBe(true);
+    const run = await store.createRun({ baseUrl: "http://localhost:3000/" });
+    const rel = await store.putScreenshot(run.id, "shot.png", Buffer.from("x"));
+    const got = await store.getScreenshot(run.id, rel);
+    expect(got.toString()).toBe("x");
+    // Path traversal is rejected.
+    await expect(store.getScreenshot(run.id, "../../etc/passwd")).rejects.toThrow(/invalid_path/);
+    // runId with `..` is rejected before hitting the filesystem.
+    await expect(store.getScreenshot("../..", rel)).rejects.toThrow(/invalid_path/);
+    // A different run id (even if a prefix) cannot read this run's screenshot.
+    const other = await store.createRun({ baseUrl: "http://localhost:3000/" });
+    await expect(store.getScreenshot(other.id, rel)).rejects.toThrow(/invalid_path/);
+    store.close();
+  });
+
+  it("recordStep surfaces duplicate_step when (goal_id, idx) collides", async () => {
+    const root = path.join(tmp, "r-dup");
+    const store = createStore(root);
+    expect((await store.init()).ok).toBe(true);
+    const run = await store.createRun({ baseUrl: "http://localhost:3000/" });
+    const goal = await store.createGoal({ runId: run.id, prompt: "12345678901" });
+    const base = {
+      goalId: goal.id,
+      url: "http://localhost:3000/",
+      action: { kind: "wait", ms: 0, intent: "x" } as const,
+      selectorResolved: null,
+      screenshotBefore: null,
+      screenshotAfter: null,
+      a11yTreePath: null,
+      verdict: "ok" as const,
+      durationMs: 1,
+    };
+    await store.recordStep({ ...base, idx: 0 });
+    await expect(store.recordStep({ ...base, idx: 0 })).rejects.toThrow(/duplicate_step/);
+    store.close();
+  });
+
+  it("runs migrations idempotently", async () => {
+    const root = path.join(tmp, "r-mig");
+    const s1 = createStore(root);
+    expect((await s1.init()).ok).toBe(true);
+    s1.close();
+    // Re-open — should not throw / re-apply migrations.
+    const s2 = createStore(root);
+    expect((await s2.init()).ok).toBe(true);
+    s2.close();
+  });
 });

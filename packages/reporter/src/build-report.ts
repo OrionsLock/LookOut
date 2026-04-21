@@ -1,11 +1,15 @@
 import type { ReportData } from "./types.js";
 
 function esc(s: string): string {
+  // Escape the five XML/HTML metacharacters, including the apostrophe — some
+  // attributes in this report use single quotes (e.g. data-tab='…'), and a
+  // rogue `'` in a URL or prompt would otherwise break out of them.
   return s
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 /**
@@ -156,16 +160,15 @@ function buildVisualTab(data: ReportData): string {
 }
 
 function buildUxTab(data: ReportData): string {
-  const rows = data.pages.filter((p) => p.uxAudit);
+  const rows = data.pages.flatMap((p) => (p.uxAudit ? [{ url: p.url, ux: p.uxAudit }] : []));
   if (!rows.length) return "<p>No UX audit data for this run.</p>";
   return rows
-    .map((p) => {
-      const u = p.uxAudit!;
-      return `<div class="goal">
-        <h3>${esc(p.url)}</h3>
-        <pre>${esc(JSON.stringify(u.scores, null, 2))}</pre>
-        <ul>${u.concerns.map((c) => `<li><span class="badge">${esc(c.severity)}</span> ${esc(c.title)} — ${esc(c.detail)}</li>`).join("")}</ul>
-      </div>`;
-    })
+    .map(
+      ({ url, ux }) => `<div class="goal">
+        <h3>${esc(url)}</h3>
+        <pre>${esc(JSON.stringify(ux.scores, null, 2))}</pre>
+        <ul>${ux.concerns.map((c) => `<li><span class="badge">${esc(c.severity)}</span> ${esc(c.title)} — ${esc(c.detail)}</li>`).join("")}</ul>
+      </div>`,
+    )
     .join("");
 }

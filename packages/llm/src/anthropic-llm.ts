@@ -33,15 +33,36 @@ function buildUserTurn(input: PlanInput): string {
   ].join("\n");
 }
 
+/**
+ * Parse a `Retry-After` header per RFC 7231. It can be either delta-seconds
+ * ("120") or an HTTP-date ("Wed, 21 Oct 2015 07:28:00 GMT"). Returns a value
+ * in milliseconds or `null` when the value is absent/unparseable.
+ */
+export function parseRetryAfterMs(value: string | null | undefined, now: number = Date.now()): number | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  // Delta-seconds path — fractional seconds are not spec-legal but we accept them.
+  if (/^\d+(\.\d+)?$/.test(trimmed)) {
+    const secs = Number(trimmed);
+    if (!Number.isFinite(secs) || secs < 0) return null;
+    return Math.round(secs * 1000);
+  }
+  // HTTP-date path — let Date parse RFC 1123 / ISO forms.
+  const t = Date.parse(trimmed);
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, t - now);
+}
+
 function mapAnthropicError(e: unknown): LLMError {
   if (e && typeof e === "object" && "status" in e) {
     const status = (e as { status?: number }).status;
     if (status === 429) {
-      const retryAfter =
-        "headers" in e && e.headers && typeof (e.headers as Headers).get === "function"
-          ? Number((e.headers as Headers).get("retry-after") ?? "0") * 1000
-          : 0;
-      return { kind: "rate_limit", retryAfterMs: retryAfter > 0 ? retryAfter : 5000 };
+      let retryAfterMs: number | null = null;
+      if ("headers" in e && e.headers && typeof (e.headers as Headers).get === "function") {
+        retryAfterMs = parseRetryAfterMs((e.headers as Headers).get("retry-after"));
+      }
+      return { kind: "rate_limit", retryAfterMs: retryAfterMs ?? 5000 };
     }
     if (status === 401) return { kind: "auth", message: "unauthorized" };
   }
