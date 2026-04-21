@@ -41,7 +41,7 @@ Optional **live** judge calls (real APIs or local Ollama; may incur cost). Set *
 pnpm vitest run packages/llm/src/judge-run.live.test.ts
 ```
 
-Published **smoke + curated report + export bundle** to GitHub Pages (on `v*` tags or manual dispatch): see **`docs/GITHUB_PAGES.md`** (`/examples/find-the-bug/` is the curated public demo).
+Published **smoke + curated** artifacts to GitHub Pages (on `v*` tags or manual dispatch): **site layout** is defined in **`docs/static/gh-pages-index.html`** (deployed as `/index.html`); **operations** (`curl`, two-workflow gotcha, troubleshooting) in **`docs/GITHUB_PAGES.md`**.
 
 See **`docs/LAUNCH_REVIEW.md`** for trust semantics (retries, strict mode, judge).
 

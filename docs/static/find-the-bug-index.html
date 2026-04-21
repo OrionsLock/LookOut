@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LookOut — curated “find the bug” example</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 42rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.55;
+      }
+      code {
+        font-size: 0.92em;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Curated Lookout run</h1>
+    <p>
+      This folder is a <strong>deliberate</strong> example, not a random CI log. Lookout ran against the
+      <code>examples/nextjs-demo</code> Next.js app. The route
+      <a href="https://github.com/OrionsLock/LookOut/blob/main/examples/nextjs-demo/app/demo-a11y-bug/page.tsx"
+        ><code>/demo-a11y-bug</code></a>
+      contains a <strong>button with no accessible name</strong> on purpose. In CI, a short
+      <code>LOOKOUT_MOCK_ACTIONS</code> script points the mock “LLM” straight at that URL so the run is reproducible;
+      Lookout’s <strong>axe</strong> integration then records <strong>a11y</strong> violations (e.g. <code>button-name</code>).
+    </p>
+    <p>
+      Open <a href="report.html"><strong>report.html</strong></a> for the rendered narrative (tabs, goals, issues), or
+      <a href="bundle.json"><strong>bundle.json</strong></a> for the raw <strong>export v2</strong> record (goals, steps, issues, paths to
+      screenshots/traces).
+    </p>
+  </body>
+</html>

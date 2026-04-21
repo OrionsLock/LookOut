@@ -43,6 +43,6 @@ Even a minimal release with three bullets signals “maintained” more than an 
 
 ## GitHub Pages (smoke + curated report + bundle)
 
-After **`gh-pages`** exists (first run of [`pages-smoke-artifacts.yml`](../.github/workflows/pages-smoke-artifacts.yml)), enable **Settings → Pages** as described in [`GITHUB_PAGES.md`](GITHUB_PAGES.md). The **`/examples/find-the-bug/`** path is the curated public demo; **`/latest/`** is CI smoke only.
+After **`gh-pages`** exists (first run of [`pages-smoke-artifacts.yml`](../.github/workflows/pages-smoke-artifacts.yml)), enable **Settings → Pages** as described in [`GITHUB_PAGES.md`](GITHUB_PAGES.md). **What each path means:** edit [`static/gh-pages-index.html`](static/gh-pages-index.html) in the repo (canonical); do not restate in other docs.
 
 Optional: custom domain **`examples.orionslock.com`** → CNAME to **`orionslock.github.io`** (see that doc).

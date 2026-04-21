@@ -1,70 +1,72 @@
-# GitHub Pages — smoke `report.html` + export bundle
+# GitHub Pages — operations & verification
 
-The workflow **[`.github/workflows/pages-smoke-artifacts.yml`](../.github/workflows/pages-smoke-artifacts.yml)** runs the **nextjs-demo** app once, then:
+**What lives where (curated vs smoke vs versioned):** the canonical description is the template **[`static/gh-pages-index.html`](static/gh-pages-index.html)**, copied to the site root as **`/index.html`**. The curated folder also gets **[`static/find-the-bug-index.html`](static/find-the-bug-index.html)** as **`/examples/find-the-bug/index.html`**. Prefer updating those HTML files over duplicating the same tables in Markdown — other docs should **link** here for Settings / `curl` / troubleshooting only.
 
-| Path | Contents |
-|------|-----------|
-| **`/examples/find-the-bug/`** | **Curated** run: mock LLM navigates to `/demo-a11y-bug` (intentional unnamed button) → axe records **a11y** issues → `report.html` + **`runs export`** bundle show a **non-trivial** agent + checks story. **Use this in README / tweets.** |
-| **`/latest/`** | **CI smoke** (`lookout.smoke.json`): clean pass, good for “what CI produces,” **not** for “look what the agent found.” **Overwritten on every deploy** — treat as a moving target. |
-| **`/<tag>/`** | Same smoke artifacts as **`/latest/`** for that **git tag** only — **stable permalink** for a given release (e.g. `v0.5.1/report.html`). |
-| **`/index.html`** | Landing with links. |
+The workflow **[`.github/workflows/pages-smoke-artifacts.yml`](../.github/workflows/pages-smoke-artifacts.yml)** builds **`_publish/`** and pushes to **`gh-pages`**.
 
 ## One-time setup
 
 1. **Merge** the workflow to `main` (it ships with the repo).
 2. **Settings → Pages** → **Build and deployment** → Source: **Deploy from a branch** → Branch **`gh-pages`** / folder **`/ (root)`** → Save.
-3. **Trigger a deploy** — push a **`v*`** tag (publishes **`/<tag>/`**, **`/latest/`**, and **`/examples/find-the-bug/`**), or **Actions → “Pages — smoke report + bundle” → Run workflow** (refreshes **`/latest/`** + **`/examples/find-the-bug/`** only).
+3. **Trigger a deploy** — push a **`v*`** tag, or **Actions → “Pages — smoke report + bundle” → Run workflow**.
 
-First load can take **1–10 minutes** after the workflow finishes.
+First **`github.io`** load can take **1–10 minutes** after the workflow finishes.
 
-## Verify Pages is wired (after you toggle Settings)
+## Two different “green” workflows
+
+After you enable Pages, GitHub may show **two** successful flows:
+
+1. **Your workflow** (`Pages — smoke report + bundle`) — writes the **`gh-pages`** branch.
+2. **`pages build and deployment`** (GitHub’s internal job) — actually serves **`github.io`**.
+
+If **(1)** is green but **`github.io` still 404s** after ~10 minutes, open **(2)** in the Actions tab; first-time Pages sometimes fails there (permissions) and passes on **re-run**. Both should be green before links resolve.
+
+## Verify after the Pages toggle
+
+**Headers** (want **200** and **`content-type`** containing **`text/html`** for the report):
 
 ```bash
-curl -sI "https://orionslock.github.io/LookOut/examples/find-the-bug/report.html" | head -n 5
+curl -sI "https://orionslock.github.io/LookOut/examples/find-the-bug/report.html" | head -n 8
 ```
 
-You want **`HTTP/2 200`** (or `HTTP/1.1 200`) and a **`content-type`** that includes **`text/html`**.
+**Bundle is real JSON with issues** (not HTML-wrapped; `issues` should be non-empty for the curated run):
 
-- **`404`** after ~10 minutes → branch/folder in **Settings → Pages** did not stick (still **None** or wrong branch).
-- **`200` but a blank page in the browser** → often **broken relative asset paths** in `report.html` (we publish the **full run directory** next to the HTML so screenshots keep working). Compare with **View Page Source** to confirm CSS/HTML arrived.
+```bash
+curl -s "https://orionslock.github.io/LookOut/examples/find-the-bug/bundle.json" | jq '.run.id, (.issues | length)'
+```
 
-## Stable vs moving URLs (for external links)
+**Browser:** open **`…/examples/find-the-bug/`** ( **`index.html`** ) and **`report.html`**. Confirm assets (screenshots) load — reports use paths relative to the published run directory; we copy the **full run folder** next to `report.html` so paths keep working.
 
-| URL pattern | Stability |
-|-------------|-----------|
-| **`/v0.5.1/...`** (per **git tag**) | **Stable** for that release — safe for blog posts, HN comments, release notes. |
-| **`/latest/...`** | **Moving** — always the **latest** smoke from the most recent Pages deploy. Old links keep working but **content changes**. |
-| **`/examples/find-the-bug/...`** | **Curated, overwritten each deploy** — stable **path**, evolving **content** (still better than `latest/` for “show me the product”). Prefer **`/v…/`** when you need a frozen artifact pair. |
+- **`404`** after ~10 minutes → **Settings → Pages** branch/folder did not stick.
+- **`200` but blank** → often broken relative asset paths; compare **View Page Source**.
 
-## If `github.io` is not enabled yet (sanity check)
+## If `github.io` is not enabled yet
 
-The workflow still commits to **`gh-pages`**. Browse the tree (no Pages toggle required):
+Browse **`gh-pages`** on GitHub (no Pages toggle required):
 
+- **Site map:** `https://github.com/OrionsLock/LookOut/blob/gh-pages/index.html` (same content as [`static/gh-pages-index.html`](static/gh-pages-index.html))
 - **Curated folder:** `https://github.com/OrionsLock/LookOut/tree/gh-pages/examples/find-the-bug`
 
-### `raw.githubusercontent.com` (escape hatch only)
+### `raw.githubusercontent.com` (bytes only)
 
-Use these **only** to confirm bytes landed — **not** as primary “browse the report” links:
+- **`.json`** — fine; **`text/plain`** is acceptable.
+- **`.html`** — served as **`text/plain`**; browsers show **source**, not a rendered page. Prefer **`github.io`** or the **GitHub tree** link above.
 
-- `https://raw.githubusercontent.com/OrionsLock/LookOut/gh-pages/examples/find-the-bug/bundle.json` — **`text/plain`** is fine for JSON.
-- `https://raw.githubusercontent.com/OrionsLock/LookOut/gh-pages/examples/find-the-bug/report.html` — GitHub serves **`.html` as `text/plain`**, so browsers show **source**, not a rendered page. Prefer the **GitHub tree** link above or **`github.io`** once Pages is on.
+## Public URLs (after Pages is on)
 
-We intentionally **do not** use third-party HTML wrappers (e.g. htmlpreview) in docs — Pages should be the renderer.
+- **Curated landing:** `https://orionslock.github.io/LookOut/examples/find-the-bug/`
+- **Curated report / bundle:** `…/examples/find-the-bug/report.html` · `…/bundle.json`
+- **Smoke:** `…/latest/report.html` · `…/latest/bundle.json` (**moving** — content changes each deploy)
+- **Versioned smoke (stable per tag):** `…/v0.5.2/report.html` (example)
 
-## README links (project Pages URL)
+## Version numbers on Releases
 
-After Pages is enabled:
+Public tags already use **`0.5.x`** (pre-public iteration). We are **not** renumbering published tags; new releases continue from **`0.5.x`** unless you explicitly decide to reset marketing versioning.
 
-- **Curated (headline):** `https://orionslock.github.io/LookOut/examples/find-the-bug/report.html` · `https://orionslock.github.io/LookOut/examples/find-the-bug/bundle.json`
-- **Smoke:** `https://orionslock.github.io/LookOut/latest/report.html` · `https://orionslock.github.io/LookOut/latest/bundle.json`
-- **Versioned example:** `https://orionslock.github.io/LookOut/v0.5.1/report.html`
+## Custom domain (optional)
 
-## Custom domain (recommended for brand)
+[GitHub Docs: configuring a custom domain](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site) — e.g. **`examples.orionslock.com`** → CNAME to **`orionslock.github.io`**.
 
-[GitHub Docs: configuring a custom domain](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site)
+## Why `bundle.json`?
 
-Example: **`examples.orionslock.com`** as a CNAME to **`orionslock.github.io`**, then set the custom domain under **Pages** (and optional **`CNAME`** file on `gh-pages`).
-
-## Why bundle next to report?
-
-`bundle.json` is **export v2**: goals, steps, issues, paths to traces/screenshots, report path. It is the portable, diff-friendly record of the run — the artifact that convinces a technical reader the system is **engineered for trust**, not only screenshots.
+Export **v2** is the portable, diff-friendly record (goals, steps, issues, artifact paths). It is the artifact that signals **trust**, not only screenshots.

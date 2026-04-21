@@ -30,7 +30,7 @@ Lookout’s primary surface is the **HTML report** (issues, steps, evidence path
 
 *Honest label: this asset is a **deliberate visual placeholder** (no freshness debt from checking in a generated report). Real runs write `report.html` plus screenshots under `.lookout/runs/<id>/`; run the smoke demo locally in seconds (see **Quick start**), or use the **hosted** copies once Pages is enabled (below).*
 
-**See it running** (GitHub Pages — [enable `gh-pages` once](docs/GITHUB_PAGES.md)): [curated report](https://orionslock.github.io/LookOut/examples/find-the-bug/report.html) · [curated bundle](https://orionslock.github.io/LookOut/examples/find-the-bug/bundle.json) — real **axe / a11y** signal from `/demo-a11y-bug`, not a trivial smoke pass. CI smoke output (`/latest/…`, stable per-tag `/v…/…`), `curl -I` checks, and **raw.githubusercontent** caveats live in [`docs/GITHUB_PAGES.md`](docs/GITHUB_PAGES.md).
+**See it running** (GitHub Pages — [enable `gh-pages` once](docs/GITHUB_PAGES.md)): [curated example](https://orionslock.github.io/LookOut/examples/find-the-bug/) · [curated bundle](https://orionslock.github.io/LookOut/examples/find-the-bug/bundle.json) — real **axe / a11y** signal from `/demo-a11y-bug`, not a trivial smoke pass. **Site map** (curated vs `latest/` vs versioned): [`docs/static/gh-pages-index.html`](docs/static/gh-pages-index.html). **Verify / troubleshoot:** [`docs/GITHUB_PAGES.md`](docs/GITHUB_PAGES.md).
 
 **Moving demo (asciinema preferred):** we do **not** embed a recording yet — **asciinema** ages better than a GIF for CLI-first flows (copy-pasteable commands, smaller repo). A GIF only wins if you need to **animate the HTML report** in a browser; static layout is already the screenshot’s job.
 

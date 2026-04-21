@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Docs + Pages**: **`find-the-bug-index.html`** on site **`/examples/find-the-bug/`**; **`GITHUB_PAGES.md`** slimmed to ops/verification (two-workflow note, `jq` check); **`gh-pages-index.html`** marked canonical map; workflow comments for **`set +e`** and **`LOOKOUT_MOCK_ACTIONS`**; README/CONTRIBUTING/`GITHUB_REPO_SETTINGS` defer layout to templates.
 - **Examples**: `nextjs-demo` **`/demo-a11y-bug`** page (intentional axe **button-name** violation) + **`lookout.showcase.json`** for curated CI.
 - **Pages workflow**: second run with **`LOOKOUT_MOCK_ACTIONS`** publishes **`/examples/find-the-bug/`** (non-trivial a11y issues in bundle); smoke stays under **`/latest/`** and **`/<tag>/`**; single dev-server session for both runs.
 - **Docs**: **`GITHUB_PAGES.md`** — `curl -I` verification, blank-page hint, **`text/plain`** caveat for raw `.html`, stable **`/v…/`** vs moving **`/latest/`**, 404 / tree fallbacks, curated path semantics; README **two-link** headline to curated report + bundle; **`gh-pages` `index.html`** sections for curated vs smoke vs versioned.
