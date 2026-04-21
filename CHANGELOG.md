@@ -20,6 +20,7 @@
 - `pnpm run test:eval` and **`docs/LAUNCH_REVIEW.md`** pre-launch checklist
 - Root **`vitest.config.ts`** with **`test.projects`** (`packages/*/vitest.config.ts`); per-package configs use **`defineProject`** (replaces deprecated `vitest.workspace.ts`)
 - Workspace packages: **`exports.types`** before **`import`/`require`** in `package.json` (Node resolution + cleaner Vite/esbuild resolution)
+- **`playwright:install`** uses **`install --with-deps chromium`** so Linux CI gets system libraries for Chromium; GitHub Actions uses **`.node-version`** for Node
 
 ## 0.4.0 — UX Audit & Multi-Provider LLM
 

@@ -18,7 +18,7 @@ See `examples/nextjs-demo` for a runnable demo application.
 
 ## Golden path (local smoke)
 
-This matches the CI end-to-end check: mock LLM, no API keys, Chromium via Playwright.
+This matches the CI end-to-end check: mock LLM, no API keys, Chromium via Playwright. `pnpm run playwright:install` uses **`--with-deps`** on Linux (CI installs apt libraries); on Windows and macOS the deps step is effectively skipped.
 
 ```bash
 pnpm install

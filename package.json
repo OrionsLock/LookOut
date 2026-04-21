@@ -24,7 +24,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
-    "playwright:install": "pnpm --filter @lookout/core exec playwright install chromium"
+    "playwright:install": "pnpm --filter @lookout/core exec playwright install --with-deps chromium"
   },
   "devDependencies": {
     "@lookout/cli": "workspace:*",
