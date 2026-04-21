@@ -1,6 +1,7 @@
 import eslint from "@eslint/js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import globals from "globals";
 import tseslint from "typescript-eslint";
 import prettier from "eslint-config-prettier";
 
@@ -41,6 +42,14 @@ export default tseslint.config(
       "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/no-non-null-assertion": "warn",
       "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
     },
   },
 );

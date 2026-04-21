@@ -34,15 +34,13 @@ jobs:
       - run: pnpm install
       - run: pnpm run playwright:install
       - run: pnpm build
-      # LOOKOUT_MOCK_ACTIONS: deterministic mock script so the curated run always navigates to /demo-a11y-bug
-      # (intentional axe violation). Without it, mock would complete immediately and the public bundle would look empty.
+      # LOOKOUT_MOCK_ACTIONS must apply ONLY to the showcase run. If it is set for smoke, the mock navigates straight
+      # to /demo-a11y-bug (intentional axe violations) and `lookout ci` exits non-zero under `set -e`, killing the step.
       - name: Build demo, run smoke + curated showcase, stage, deploy
-        env:
-          LOOKOUT_MOCK_ACTIONS: >-
-            [{"kind":"navigate","url":"http://127.0.0.1:3000/demo-a11y-bug","intent":"Open intentional a11y demo"},{"kind":"complete","reason":"showcase: axe runs after navigate; expect a11y issues in the bundle"}]
         run: |
           set -e
           DEMO="examples/nextjs-demo"
+          SHOWCASE_MOCK='[{"kind":"navigate","url":"http://127.0.0.1:3000/demo-a11y-bug","intent":"Open intentional a11y demo"},{"kind":"complete","reason":"showcase: axe runs after navigate; expect a11y issues in the bundle"}]'
           pnpm --filter nextjs-demo build
           pnpm --filter nextjs-demo start &
           NEXT_PID=$!
@@ -58,7 +56,7 @@ jobs:
           # Showcase `lookout ci` is EXPECTED to exit non-zero (regressions + major a11y issues). We still publish
           # report + bundle for /examples/find-the-bug/. This is not masking smoke failures — smoke above must stay strict.
           set +e
-          pnpm exec lookout ci -C "$DEMO" --config lookout.showcase.json
+          LOOKOUT_MOCK_ACTIONS="$SHOWCASE_MOCK" pnpm exec lookout ci -C "$DEMO" --config lookout.showcase.json
           set -e
           SHOWCASE_ID=$(pnpm exec lookout runs list -C "$DEMO" --json | jq -r '.runs[0].id')
 
