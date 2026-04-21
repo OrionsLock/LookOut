@@ -1,0 +1,113 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { createStore, normalizeUrl, urlHash } from "./index.js";
+
+const tmp = path.join(process.cwd(), "tmp-store");
+
+afterEach(async () => {
+  const { rm } = await import("node:fs/promises");
+  await rm(tmp, { recursive: true, force: true });
+});
+
+describe("normalizeUrl + urlHash", () => {
+  it("strips query and trailing slash", () => {
+    expect(normalizeUrl("https://ex.com/a/?x=1#h")).toBe("https://ex.com/a");
+  });
+
+  it("has stable hash", () => {
+    expect(urlHash("https://ex.com/a?x=1")).toBe(urlHash("https://ex.com/a"));
+  });
+});
+
+describe("Store", () => {
+  it("roundtrips run goal step issue", async () => {
+    const root = path.join(tmp, "r1");
+    const store = createStore(root);
+    const init = await store.init();
+    expect(init.ok).toBe(true);
+
+    const run = await store.createRun({ baseUrl: "http://localhost:3000" });
+    const goal = await store.createGoal({ runId: run.id, prompt: "12345678901" });
+    await store.updateGoal(goal.id, { status: "running", startedAt: Date.now() });
+
+    const rel = await store.putScreenshot(run.id, "0-after.png", Buffer.from("png"));
+    expect(rel).toContain("runs/");
+    const step = await store.recordStep({
+      goalId: goal.id,
+      idx: 0,
+      url: "http://localhost:3000/",
+      action: { kind: "wait", ms: 0, intent: "x" },
+      selectorResolved: null,
+      screenshotBefore: null,
+      screenshotAfter: rel,
+      a11yTreePath: null,
+      verdict: "ok",
+      durationMs: 1,
+    });
+    expect(step.id).toBeTruthy();
+
+    const steps = await store.listStepsForGoal(goal.id);
+    expect(steps).toHaveLength(1);
+
+    await store.recordIssue({
+      runId: run.id,
+      stepId: step.id,
+      severity: "major",
+      category: "console",
+      title: "t",
+      detail: { x: 1 },
+    });
+    const issues = await store.listIssuesForRun(run.id);
+    expect(issues).toHaveLength(1);
+
+    store.close();
+  });
+
+  it("rejects path traversal in putScreenshot", async () => {
+    const root = path.join(tmp, "r2");
+    const store = createStore(root);
+    expect((await store.init()).ok).toBe(true);
+    const run = await store.createRun({ baseUrl: "http://localhost:3000" });
+    await expect(store.putScreenshot(run.id, "../x.png", Buffer.from("a"))).rejects.toThrow();
+    store.close();
+  });
+
+  it("baseline roundtrip", async () => {
+    const root = path.join(tmp, "r3");
+    const store = createStore(root);
+    expect((await store.init()).ok).toBe(true);
+    const run = await store.createRun({ baseUrl: "http://localhost:3000" });
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const b = await store.putBaseline({ url: "http://localhost:3000/a", screenshotBytes: png, runId: run.id });
+    const got = await store.getBaseline(b.urlHash);
+    expect(got?.url).toBe(normalizeUrl("http://localhost:3000/a"));
+    const cleared = await store.clearBaselines();
+    expect(cleared).toBe(1);
+    store.close();
+  });
+
+  it("concurrent writes", async () => {
+    const root = path.join(tmp, "r4");
+    const store = createStore(root);
+    expect((await store.init()).ok).toBe(true);
+    const run = await store.createRun({ baseUrl: "http://localhost:3000" });
+    await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        store.putScreenshot(run.id, `f-${i}.png`, Buffer.from(String(i))),
+      ),
+    );
+    store.close();
+  });
+
+  it("init fails on corrupt db file", async () => {
+    const root = path.join(tmp, "r5");
+    await mkdir(root, { recursive: true });
+    await writeFile(path.join(root, "runs.db"), "not sqlite");
+    const store = createStore(root);
+    const init = await store.init();
+    expect(init.ok).toBe(false);
+    if (!init.ok) expect(init.error.kind).toBe("corrupt_db");
+    store.close();
+  });
+});

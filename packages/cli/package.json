@@ -1,0 +1,32 @@
+{
+  "name": "@lookout/cli",
+  "version": "0.5.0",
+  "type": "module",
+  "bin": {
+    "lookout": "./bin/lookout.mjs"
+  },
+  "files": ["bin", "dist"],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@lookout/analyzers": "workspace:*",
+    "@lookout/config": "workspace:*",
+    "@lookout/core": "workspace:*",
+    "@lookout/emitter-playwright": "workspace:*",
+    "@lookout/llm": "workspace:*",
+    "@lookout/reporter": "workspace:*",
+    "@lookout/store": "workspace:*",
+    "@lookout/types": "workspace:*",
+    "chalk": "^5.4.1",
+    "commander": "^12.1.0",
+    "open": "^10.1.0",
+    "ora": "^8.1.1"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

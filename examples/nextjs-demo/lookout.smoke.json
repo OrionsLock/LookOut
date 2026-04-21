@@ -1,0 +1,18 @@
+{
+  "baseUrl": "http://127.0.0.1:3000",
+  "auth": { "type": "none" },
+  "llm": {
+    "provider": "mock",
+    "model": "mock",
+    "vision": false,
+    "maxTokens": 256
+  },
+  "crawl": {
+    "maxStepsPerGoal": 5,
+    "maxParallelAgents": 1,
+    "goals": [{ "id": "smoke-home", "prompt": "123456789012 verify the app home page responds" }]
+  },
+  "checks": {},
+  "emitters": {},
+  "report": { "format": ["html"], "openAfterRun": false, "traceOnFailure": false }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "lookout-monorepo",
+  "private": true,
+  "license": "MIT",
+  "description": "Lookout — AI-assisted QA for web apps (Playwright + LLM, reports, MCP).",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OrionsLock/LookOut.git"
+  },
+  "pnpm": {
+    "overrides": {
+      "vite": "^6.4.2",
+      "esbuild": "^0.25.0"
+    }
+  },
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/*\" run build",
+    "test": "vitest run",
+    "test:eval": "vitest run packages/llm/src/judge-run.test.ts packages/store/src/issue-diff.test.ts packages/store/src/run-export.test.ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "playwright:install": "pnpm --filter @lookout/core exec playwright install chromium"
+  },
+  "devDependencies": {
+    "@lookout/cli": "workspace:*",
+    "@lookout/mcp-server": "workspace:*",
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^20.17.10",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1",
+    "vitest": "^3.2.4"
+  }
+}

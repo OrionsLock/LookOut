@@ -1,0 +1,12 @@
+node_modules
+dist
+.lookout
+.DS_Store
+*.tsbuildinfo
+coverage
+.next
+out
+.turbo
+.env
+.env.*
+!.env.example

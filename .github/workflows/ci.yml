@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm run playwright:install
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+      - name: E2E smoke (mock LLM + Next.js demo)
+        run: |
+          set -e
+          pnpm --filter nextjs-demo build
+          pnpm --filter nextjs-demo start &
+          NEXT_PID=$!
+          for i in $(seq 1 90); do
+            if curl -sf "http://127.0.0.1:3000" >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -sf "http://127.0.0.1:3000" >/dev/null
+          pnpm exec lookout ci -C examples/nextjs-demo --config lookout.smoke.json
+          kill "$NEXT_PID" || true
+          wait "$NEXT_PID" 2>/dev/null || true

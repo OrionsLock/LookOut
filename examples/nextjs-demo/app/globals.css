@@ -1,0 +1,8 @@
+body {
+  font-family: system-ui, sans-serif;
+  margin: 2rem;
+  line-height: 1.5;
+}
+a {
+  color: #2563eb;
+}
