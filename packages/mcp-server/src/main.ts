@@ -9,6 +9,7 @@ import {
   diffIssuesByFingerprint,
   type StoreWithRoot,
 } from "@lookout/store";
+import { resolveMcpCwd, type ResolveMcpCwdError } from "./resolve-mcp-cwd.js";
 
 const server = new Server({ name: "lookout-mcp", version: "0.5.0" }, { capabilities: { tools: {} } });
 
@@ -95,46 +96,27 @@ function pickString(obj: Record<string, unknown>, key: string): string {
 
 type McpTextResponse = { content: [{ type: "text"; text: string }] };
 
-/**
- * Resolve MCP `cwd` to an absolute path. If `LOOKOUT_MCP_ROOT` is set, `cwd` must lie under that directory.
- */
-function resolveMcpCwd(raw: string): { ok: true; cwd: string } | { ok: false; response: McpTextResponse } {
-  const t = raw.trim();
-  if (!t) {
-    return {
-      ok: false,
-      response: { content: [{ type: "text", text: JSON.stringify({ ok: false, error: "cwd_empty" }) }] },
-    };
+function mcpCwdErrorResponse(error: ResolveMcpCwdError): McpTextResponse {
+  if (error === "cwd_empty") {
+    return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: "cwd_empty" }) }] };
   }
-  const resolved = path.resolve(t);
-  const guard = process.env.LOOKOUT_MCP_ROOT?.trim();
-  if (guard) {
-    const root = path.resolve(guard);
-    const rel = path.relative(root, resolved);
-    if (rel.startsWith("..") || path.isAbsolute(rel)) {
-      return {
-        ok: false,
-        response: {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                ok: false,
-                error: "cwd_outside_LOOKOUT_MCP_ROOT",
-                detail: "Set LOOKOUT_MCP_ROOT to a single parent directory and pass cwd under it.",
-              }),
-            },
-          ],
-        },
-      };
-    }
-  }
-  return { ok: true, cwd: resolved };
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          ok: false,
+          error: "cwd_outside_LOOKOUT_MCP_ROOT",
+          detail: "Set LOOKOUT_MCP_ROOT to a single parent directory and pass cwd under it.",
+        }),
+      },
+    ],
+  };
 }
 
 function openStoreAtProjectRoot(rawCwd: string): { ok: true; store: StoreWithRoot; cwd: string } | { ok: false; response: McpTextResponse } {
   const cwdRes = resolveMcpCwd(rawCwd);
-  if (!cwdRes.ok) return cwdRes;
+  if (!cwdRes.ok) return { ok: false, response: mcpCwdErrorResponse(cwdRes.error) };
   const store = createStore(path.join(cwdRes.cwd, ".lookout"));
   return { ok: true, store, cwd: cwdRes.cwd };
 }

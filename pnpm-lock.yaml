@@ -285,8 +285,8 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
       vitest:
-        specifier: ^2.1.8
-        version: 2.1.9(@types/node@20.19.39)(jiti@2.6.1)
+        specifier: ^3.2.4
+        version: 3.2.4(@types/node@20.19.39)(jiti@2.6.1)
 
   packages/recorders:
     dependencies:
