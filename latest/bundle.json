@@ -1,0 +1,53 @@
+{
+  "version": 2,
+  "exportedAt": 1776810032598,
+  "cwd": "/home/runner/work/LookOut/LookOut/examples/nextjs-demo",
+  "run": {
+    "id": "01KPS22QTXZMWSFXC4JHEZA2DA",
+    "startedAt": 1776810024797,
+    "endedAt": 1776810026272,
+    "baseUrl": "http://127.0.0.1:3000",
+    "commitSha": "c00f280ffe874a1b53acc99e816a8bf95afbb735",
+    "verdict": "clean",
+    "summary": {
+      "goalsAttempted": 1,
+      "goalsComplete": 1,
+      "goalsStuck": 0,
+      "stepsTotal": 0,
+      "issuesBySeverity": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "info": 0
+      },
+      "llmUsage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "planCalls": 1,
+        "scoreCalls": 0
+      }
+    }
+  },
+  "goals": [
+    {
+      "id": "01KPS22QTXZMWSFXC4JHEZA2DA_smoke-home",
+      "runId": "01KPS22QTXZMWSFXC4JHEZA2DA",
+      "prompt": "123456789012 verify the app home page responds",
+      "status": "complete",
+      "stepsTaken": 0,
+      "startedAt": 1776810026073,
+      "endedAt": 1776810026264
+    }
+  ],
+  "goalSteps": [
+    {
+      "goalId": "01KPS22QTXZMWSFXC4JHEZA2DA_smoke-home",
+      "steps": []
+    }
+  ],
+  "issues": [],
+  "artifacts": {
+    "reportHtmlRelative": ".lookout/runs/01KPS22QTXZMWSFXC4JHEZA2DA/report.html",
+    "traceZips": []
+  }
+}
