@@ -18,6 +18,7 @@
 - `lookout ci --strict-retry` with `--retries`: exit 1 if a retry was needed to pass; stderr `will_retry` before each retry after a failed attempt
 - `lookout verify-run` — LLM-as-judge (`accept`/`reject`) over export bundle v2; `lookout runs emit-playwright <runId> --out <dir>`; shared `emitAuthFromConfig` for emitter auth
 - `pnpm run test:eval` and **`docs/LAUNCH_REVIEW.md`** pre-launch checklist
+- Root **`vitest.config.ts`** with **`test.projects`** (`packages/*/vitest.config.ts`); per-package configs use **`defineProject`** (replaces deprecated `vitest.workspace.ts`)
 
 ## 0.4.0 — UX Audit & Multi-Provider LLM
 

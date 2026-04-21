@@ -9,7 +9,7 @@ Thanks for helping improve Lookout. This project uses **pnpm**, **Node 20+**, an
    `pnpm run playwright:install`
 3. Run checks from the repo root:
    - `pnpm lint`
-   - `pnpm test`
+   - `pnpm test` (Vitest reads **`vitest.config.ts`** and **`test.projects`** for each `packages/*/vitest.config.ts`)
    - `pnpm build`
 4. Optional quick subset: `pnpm run test:eval`
 
