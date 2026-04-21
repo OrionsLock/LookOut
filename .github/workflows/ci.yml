@@ -21,9 +21,10 @@ jobs:
           cache: pnpm
       - run: pnpm install
       - run: pnpm run playwright:install
+      # type-aware ESLint + Vitest resolve workspace deps via package "types" -> dist/*.d.ts
+      - run: pnpm build
       - run: pnpm lint
       - run: pnpm test
-      - run: pnpm build
       - name: E2E smoke (mock LLM + Next.js demo)
         run: |
           set -e

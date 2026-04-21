@@ -61,13 +61,13 @@ The `@lookout/mcp-server` package exposes stdio tools: `lookout_list_runs`, `loo
 ## Development
 
 ```bash
+pnpm build
 pnpm lint
 pnpm test
-pnpm build
 pnpm run test:eval
 ```
 
-`pnpm run test:eval` runs a small fast subset (judge JSON parsing, issue diff, export bundle). For a human launch pass, see **`docs/LAUNCH_REVIEW.md`**.
+Run **`pnpm build`** before lint and tests so workspace packages expose **`dist/*.d.ts`** (required for type-aware ESLint and for Vitest resolving `@lookout/*` entries). `pnpm run test:eval` runs a small fast subset (judge JSON parsing, issue diff, export bundle). For a human launch pass, see **`docs/LAUNCH_REVIEW.md`**.
 
 Browser-backed tests in `@lookout/core` are skipped automatically when Playwright’s Chromium binary is not installed (`pnpm run playwright:install`).
 

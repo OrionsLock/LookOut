@@ -5,9 +5,9 @@ Concise pre-launch pass over trust, safety, and known limits. This is not a warr
 ## Build & gates
 
 - `pnpm install && pnpm run playwright:install` (for full tests / local integration).
-- `pnpm run build` — all `packages/*` emit.
+- `pnpm run build` — all `packages/*` emit (`dist/` required before lint/tests for workspace `types`).
 - `pnpm test` — unit + package tests; core orchestrator integration skips without Chromium.
-- `pnpm lint` — expect only a few `no-non-null-assertion` warnings unless tightened.
+- `pnpm lint` — after build; expect only a few `no-non-null-assertion` warnings unless tightened.
 - `pnpm run test:eval` — fast sanity for judge JSON parsing + issue diff + export bundle.
 
 ## Trust & CI semantics
