@@ -41,6 +41,8 @@ Optional **live** judge calls (real APIs or local Ollama; may incur cost). Set *
 pnpm vitest run packages/llm/src/judge-run.live.test.ts
 ```
 
+Published **smoke report + export bundle** to GitHub Pages (on `v*` tags or manual dispatch): see **`docs/GITHUB_PAGES.md`**.
+
 See **`docs/LAUNCH_REVIEW.md`** for trust semantics (retries, strict mode, judge).
 
 ## Code style

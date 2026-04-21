@@ -40,3 +40,9 @@ git push origin v0.5.0
 Then **Releases → Draft a new release**: choose tag `v0.5.0`, title `LookOut 0.5.0`, body = copy the **0.5.0** section from `CHANGELOG.md` (first ~10 bullets are enough).
 
 Even a minimal release with three bullets signals “maintained” more than an empty Releases tab.
+
+## GitHub Pages (smoke report + bundle)
+
+After **`gh-pages`** exists (first run of [`pages-smoke-artifacts.yml`](../.github/workflows/pages-smoke-artifacts.yml)), enable **Settings → Pages** as described in [`GITHUB_PAGES.md`](GITHUB_PAGES.md).
+
+Optional: custom domain **`examples.orionslock.com`** → CNAME to **`orionslock.github.io`** (see that doc).

@@ -6,7 +6,7 @@
 
 It exists because teams already have Playwright and LLMs, but not a single loop that (1) explores like a human, (2) **writes evidence** (HTML report, screenshots, optional traces), (3) **exports Playwright specs** from real runs, (4) exposes the same store over **MCP** to Cursor-style clients, and (5) supports a **second-pass LLM judge** (`verify-run`) and **flake-as-signal** retries in CI—not just pass/fail noise.
 
-Open source by [OrionsLock](https://orionslock.com). **Repo presentation checklist** (description, topics, social image, first release): [`docs/GITHUB_REPO_SETTINGS.md`](docs/GITHUB_REPO_SETTINGS.md).
+Open source by [OrionsLock](https://orionslock.com). **Repo checklist** (description, topics, social image, first release): [`docs/GITHUB_REPO_SETTINGS.md`](docs/GITHUB_REPO_SETTINGS.md). **Published smoke artifacts** (HTML report + export bundle on GitHub Pages): [`docs/GITHUB_PAGES.md`](docs/GITHUB_PAGES.md).
 
 ---
 
@@ -26,11 +26,17 @@ Open source by [OrionsLock](https://orionslock.com). **Repo presentation checkli
 
 Lookout’s primary surface is the **HTML report** (issues, steps, evidence paths)—not a transcript.
 
-![Representative HTML report / product UI (marketing preview)](docs/assets/report-preview.png)
+![Preview mockup — not a real Lookout HTML export; shows the kind of panel layout and severity styling you get in an actual `report.html`.](docs/assets/report-preview.png)
 
-*Illustrative layout: real runs write `report.html` under `.lookout/runs/<id>/`. Run the smoke demo locally to generate one in seconds (see **Quick start** below).*
+*Honest label: this asset is a **deliberate visual placeholder** (no freshness debt from checking in a generated report). Real runs write `report.html` plus screenshots under `.lookout/runs/<id>/`; run the smoke demo locally in seconds (see **Quick start**), or use the **hosted** copies once Pages is enabled (below).*
 
-**Moving demo (GIF / asciinema):** not embedded yet—PRs welcome. Until then, a **one-command** local proof (Next demo + `lookout ci` + `lookout verify-run` + MCP stdio checks) is:
+**Live artifacts (GitHub Pages)** — CI can publish the smoke run’s **`report.html`** next to the raw **`runs export` bundle (JSON v2)** (portable, diff-friendly record of the agent run). Same trust story as local: [browse the report](https://orionslock.github.io/LookOut/latest/report.html) · [inspect the bundle](https://orionslock.github.io/LookOut/latest/bundle.json). **One-time setup:** [`docs/GITHUB_PAGES.md`](docs/GITHUB_PAGES.md) (branch `gh-pages`, optional custom domain e.g. `examples.orionslock.com`).
+
+**Moving demo (asciinema preferred):** we do **not** embed a recording yet — **asciinema** ages better than a GIF for CLI-first flows (copy-pasteable commands, smaller repo). A GIF only wins if you need to **animate the HTML report** in a browser; static layout is already the screenshot’s job.
+
+> **Ideal capture for a contributor asciinema:** `lookout run` or `lookout ci` on **`examples/nextjs-demo`** → the agent surfaces a **real defect** (e.g. broken form) → open the generated **`report.html`** → run **`lookout runs emit-playwright <runId> --out …`** so a **`.spec.ts` lands on disk**. That sells the **agent → evidence → Playwright artifact** loop, not “here’s a terminal scrolling.” **PRs welcome** to embed the recording here.
+
+Until a recording lands, a **one-command** local proof (Next demo + `lookout ci` + `lookout verify-run` + MCP stdio checks) is:
 
 ```bash
 pnpm install && pnpm run playwright:install && pnpm build && pnpm run prove

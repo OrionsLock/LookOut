@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- **Docs**: README reframed around thesis + differentiators + visual preview; **`docs/GITHUB_REPO_SETTINGS.md`** for description / website / topics / social preview / **`v0.5.0`** release checklist; **`docs/assets/github-social-preview.png`** (1280×640) for GitHub social upload and README hero.
+- **Docs**: README — honest preview mockup labeling, asciinema-first demo guidance (ideal capture described in HTML comment), GitHub Pages links for **latest report + bundle**; **`docs/GITHUB_PAGES.md`** + **`docs/static/gh-pages-index.html`**; **`docs/GITHUB_REPO_SETTINGS.md`** links Pages setup.
+- **CI**: **`pages-smoke-artifacts`** workflow publishes smoke **`report.html`** (full run dir for relative assets) + **`runs export`** bundle to **`gh-pages`** on **`v*`** tags (and **`latest/`** alias); **`workflow_dispatch`** refreshes **`latest/`** only.
+- **Docs (earlier)**: README reframed around thesis + differentiators + visual preview; **`docs/GITHUB_REPO_SETTINGS.md`** for description / website / topics / social preview / **`v0.5.0`** release checklist; **`docs/assets/github-social-preview.png`** (1280×640) for GitHub social upload and README hero.
 - **Store**: `readA11ySnapshotFromStore` validates relative paths under the store root; **`listStepsForGoal`** / **`listIssuesForRun`** safely parse stored JSON (`ActionSchema`, fallbacks on corrupt data).
 - **MCP**: Optional **`LOOKOUT_MCP_ROOT`** env restricts tool `cwd`; **`pnpm run`** / docs updated.
 - **Explorer**: **`navigate`** allows only **http/https**; **`wait`** uses `setTimeout` instead of deprecated **`page.waitForTimeout`**; invalid **network** regex patterns in config are skipped.

@@ -1,0 +1,83 @@
+# Publishes the nextjs-demo smoke run to GitHub Pages (gh-pages branch):
+#   /<tag>/report.html + bundle.json   (immutable per release tag)
+#   /latest/...                         (alias; updated on each tag push)
+#   /index.html                         (landing with links)
+#
+# Enable Pages: Settings → Pages → Build from branch → gh-pages / (root).
+name: Pages — smoke report + bundle
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages-smoke-artifacts
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm run playwright:install
+      - run: pnpm build
+      - name: Smoke (mock LLM + Next.js demo)
+        run: |
+          set -e
+          pnpm --filter nextjs-demo build
+          pnpm --filter nextjs-demo start &
+          NEXT_PID=$!
+          for i in $(seq 1 90); do
+            if curl -sf "http://127.0.0.1:3000" >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -sf "http://127.0.0.1:3000" >/dev/null
+          pnpm exec lookout ci -C examples/nextjs-demo --config lookout.smoke.json
+          kill "$NEXT_PID" || true
+          wait "$NEXT_PID" 2>/dev/null || true
+      - name: Stage Pages (versioned + latest + index)
+        run: |
+          set -e
+          DEMO="examples/nextjs-demo"
+          RUN_ID=$(pnpm exec lookout runs list -C "$DEMO" --json | jq -r '.runs[0].id')
+          test -n "$RUN_ID" && test "$RUN_ID" != "null"
+          RUN_DIR="$DEMO/.lookout/runs/$RUN_ID"
+          test -f "$RUN_DIR/report.html"
+
+          rm -rf _publish
+          mkdir -p _publish
+          touch _publish/.nojekyll
+          cp docs/static/gh-pages-index.html _publish/index.html
+
+          stage_one() {
+            DEST="$1"
+            mkdir -p "$DEST"
+            cp -a "$RUN_DIR/." "$DEST/"
+            pnpm exec lookout runs export "$RUN_ID" --out "$(pwd)/$DEST/bundle.json" -C "$DEMO"
+          }
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            stage_one _publish/latest
+          else
+            TAG="${GITHUB_REF_NAME}"
+            mkdir -p "_publish/$TAG" _publish/latest
+            stage_one "_publish/$TAG"
+            cp -a "_publish/$TAG/." _publish/latest/
+          fi
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_publish
+          keep_files: true
