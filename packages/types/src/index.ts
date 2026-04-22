@@ -50,7 +50,8 @@ export const IssueSchema = z.object({
   severity: SeveritySchema,
   category: IssueCategorySchema,
   title: z.string(),
-  detail: z.record(z.unknown()),
+  // Zod 4 requires an explicit key schema for z.record(); Zod 3 accepts this too.
+  detail: z.record(z.string(), z.unknown()),
   createdAt: z.number().int(),
 });
 export type Issue = z.infer<typeof IssueSchema>;
@@ -89,7 +90,7 @@ export const RunSchema = z.object({
   baseUrl: z.string().url(),
   commitSha: z.string().nullable(),
   verdict: RunVerdictSchema,
-  summary: z.record(z.unknown()).nullable(),
+  summary: z.record(z.string(), z.unknown()).nullable(),
 });
 export type Run = z.infer<typeof RunSchema>;
 
