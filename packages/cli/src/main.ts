@@ -1,122 +1,34 @@
 import path from "node:path";
 import chalk from "chalk";
 import { Command } from "commander";
-import { loadConfig, type ResolvedLookoutConfig } from "@lookout/config";
+import { loadConfig, loadPolicyPack, POLICY_INIT_TEMPLATE, type ResolvedLookoutConfig } from "@lookout/config";
 import {
-  createClient,
+  diagnoseFlakeMarkdown,
   judgeRunMarkdown,
   suggestHealingMarkdown,
-  type LLMClient,
-  type LLMConfig,
+  suggestRepairUnifiedDiffMarkdown,
 } from "@lookout/llm";
-import { buildRunExportBundle, createStore, diffIssuesByFingerprint } from "@lookout/store";
+import {
+  buildRunExportBundle,
+  createStore,
+  diffIssuesByFingerprint,
+  summarizeFlakePairMarkdown,
+} from "@lookout/store";
 import { writeReport, writeJunitXml } from "@lookout/reporter";
 import { emitAll, type EmitSpecInput } from "@lookout/emitter-playwright";
-
-function emitAuthFromConfig(config: ResolvedLookoutConfig): EmitSpecInput["auth"] {
-  if (config.auth.type === "credentials") {
-    return {
-      type: "credentials",
-      loginUrl: new URL(config.auth.loginUrl, config.baseUrl).toString(),
-      usernameSelector: config.auth.usernameSelector,
-      passwordSelector: config.auth.passwordSelector,
-      submitSelector: config.auth.submitSelector,
-    };
-  }
-  if (config.auth.type === "storageState") {
-    return { type: "storageState", storageStatePath: config.auth.path };
-  }
-  return { type: "none" };
-}
-
-function llmClientConfig(llm: ResolvedLookoutConfig["llm"]): LLMConfig {
-  const c: LLMConfig = {
-    provider: llm.provider,
-    model: llm.model,
-    vision: llm.vision,
-    maxTokens: llm.maxTokens,
-  };
-  if (llm.apiKey !== undefined) c.apiKey = llm.apiKey;
-  if (llm.baseUrl !== undefined) c.baseUrl = llm.baseUrl;
-  return c;
-}
-
-type Telemetry = {
-  inputTokens: number;
-  outputTokens: number;
-  planCalls: number;
-  scoreCalls: number;
-};
-
-function createTrackedLlm(llm: ResolvedLookoutConfig["llm"], telemetry: Telemetry): LLMClient {
-  const base = createClient(llmClientConfig(llm), {
-    onUsage: (u) => {
-      telemetry.inputTokens += u.inputTokens;
-      telemetry.outputTokens += u.outputTokens;
-    },
-  });
-  return {
-    planAction: async (input) => {
-      telemetry.planCalls++;
-      return base.planAction(input);
-    },
-    scoreUX: async (input) => {
-      telemetry.scoreCalls++;
-      return base.scoreUX(input);
-    },
-  };
-}
-
-function formatHealMarkdown(runId: string, goals: { id: string; status: string; prompt: string }[], issues: { severity: string; title: string; category: string; detail: unknown }[]): string {
-  const lines = [`# Run ${runId}`, "", "## Goals", ...goals.map((g) => `- **${g.id}** (${g.status}): ${g.prompt}`), "", "## Issues", ...issues.map((i) => `- [${i.severity}/${i.category}] ${i.title}: \`${JSON.stringify(i.detail).slice(0, 500)}\``)];
-  return lines.join("\n");
-}
-
-const FAIL_LEVELS = ["critical", "major", "minor"] as const;
-type FailLevel = (typeof FAIL_LEVELS)[number];
-
-function parseFailLevel(raw: string | undefined, fallback: FailLevel = "major"): FailLevel {
-  if (raw === undefined) return fallback;
-  const ok = (FAIL_LEVELS as readonly string[]).includes(raw);
-  if (!ok) {
-    process.stderr.write(
-      chalk.red(
-        `invalid --fail-level: ${raw}. Use one of: ${FAIL_LEVELS.join(", ")}\n`,
-      ),
-    );
-    process.exit(2);
-  }
-  return raw as FailLevel;
-}
-
-/**
- * Decide the process exit code for a completed run.
- * - exit 2: orchestrator/goal errors (something fell over)
- * - exit 1: regressions, or any issue at-or-above `failLevel`
- * - exit 0: clean
- *
- * The severity order (most-severe → least-severe) is critical > major > minor > info,
- * and `failLevel` selects the **minimum** severity that counts as a failure.
- */
-export function exitCodeFor(
-  verdict: string,
-  failLevel: FailLevel,
-  issues: { severity: string }[],
-): number {
-  if (verdict === "errors") return 2;
-  const severityOrder = ["critical", "major", "minor", "info"] as const;
-  const failIdx = severityOrder.indexOf(failLevel);
-  if (failIdx < 0) {
-    // Defence in depth: parseFailLevel already rejects unknown values.
-    throw new Error(`invariant_failed: unknown failLevel ${failLevel}`);
-  }
-  const hit = issues.some((i) => {
-    const idx = severityOrder.indexOf(i.severity as (typeof severityOrder)[number]);
-    return idx >= 0 && idx <= failIdx;
-  });
-  if (verdict === "regressions" || hit) return 1;
-  return 0;
-}
+import { digestPlaywrightTraceZip } from "@lookout/analyzers";
+import { buildFlakeSuspectedPayload } from "./ci-flake-diagnostics.js";
+import { extractUnifiedDiffFromHealMarkdown, tryApplyUnifiedDiff } from "./apply-heal-diff.js";
+import { findFlakePairFromStderrLog } from "./flake-stderr-parse.js";
+import {
+  createTrackedLlm,
+  emitAuthFromConfig,
+  exitCodeFor,
+  formatHealMarkdown,
+  llmClientConfig,
+  type Telemetry,
+  parseFailLevel,
+} from "./commands/_shared.js";
 
 async function cmdRun(opts: {
   url?: string | undefined;
@@ -221,6 +133,8 @@ async function cmdCi(opts: {
   let lastRunId: string | undefined;
   let lastExitCode = 1;
   let junitWritten = false;
+  /** Last completed run that exited non-zero; used when a retry later passes (`flake_suspected`). */
+  let priorFailedRunId: string | undefined;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const telemetry: Telemetry = { inputTokens: 0, outputTokens: 0, planCalls: 0, scoreCalls: 0 };
@@ -275,8 +189,11 @@ async function cmdCi(opts: {
           JSON.stringify({
             level: "info",
             phase: "lookout_ci",
-            flake_suspected: true,
-            passed_on_attempt: attempt,
+            ...buildFlakeSuspectedPayload({
+              passedOnAttempt: attempt,
+              passedRunId: runId,
+              priorFailedRunId,
+            }),
           }) + "\n",
         );
         if (opts.failOnRetryRecovery) {
@@ -291,8 +208,10 @@ async function cmdCi(opts: {
           process.exit(1);
         }
       }
+      priorFailedRunId = undefined;
       process.exit(0);
     }
+    priorFailedRunId = runId;
     if (attempt < maxAttempts) {
       process.stderr.write(
         JSON.stringify({
@@ -440,6 +359,153 @@ async function cmdRunsExport(opts: { cwd: string; runId: string; out: string }) 
   process.stdout.write(chalk.green(`wrote ${outPath}\n`));
 }
 
+async function cmdRunsDiagnoseFlake(opts: {
+  cwd: string;
+  failRunId: string;
+  passRunId: string;
+  json?: boolean | undefined;
+  configFile?: string | undefined;
+  /** Include machine-extracted trace NDJSON digests (first trace zip per run). */
+  withTraceDigests?: boolean | undefined;
+}) {
+  const cfgRes = await loadConfig(opts.cwd, opts.configFile ? { configFile: opts.configFile } : undefined);
+  if (!cfgRes.ok) {
+    process.stderr.write(chalk.red(`Config error: ${JSON.stringify(cfgRes.error)}\n`));
+    process.exit(2);
+  }
+  const polRes = await loadPolicyPack(opts.cwd);
+  if (!polRes.ok) {
+    process.stderr.write(chalk.red(`lookout.policy.json: ${JSON.stringify(polRes.error)}\n`));
+    process.exit(2);
+  }
+  const policy = polRes.value;
+  const config = cfgRes.value;
+  const storeRoot = path.join(opts.cwd, ".lookout");
+  const store = createStore(storeRoot);
+  const init = await store.init();
+  if (!init.ok) {
+    process.stderr.write(chalk.red("store init failed\n"));
+    process.exit(2);
+  }
+  const [failBundle, passBundle] = await Promise.all([
+    buildRunExportBundle(store, storeRoot, opts.cwd, opts.failRunId),
+    buildRunExportBundle(store, storeRoot, opts.cwd, opts.passRunId),
+  ]);
+  if (!failBundle || !passBundle) {
+    process.stderr.write(chalk.red("one or both runs not found\n"));
+    process.exit(2);
+  }
+  const summary = summarizeFlakePairMarkdown(failBundle, passBundle);
+  let traceExtra = "";
+  if (opts.withTraceDigests) {
+    const chunks: string[] = ["\n\n## Trace digest (fail run, first zip)\n"];
+    const fr = failBundle.artifacts.traceZips[0];
+    if (fr) {
+      const d = await digestPlaywrightTraceZip(path.resolve(opts.cwd, fr), { maxOutChars: 8000 });
+      chunks.push(`### ${fr}\n\n\`\`\`text\n${d}\n\`\`\`\n`);
+    } else {
+      chunks.push("_(no trace zip on fail run)_\n");
+    }
+    chunks.push("\n## Trace digest (pass run, first zip)\n");
+    const pr = passBundle.artifacts.traceZips[0];
+    if (pr) {
+      const d = await digestPlaywrightTraceZip(path.resolve(opts.cwd, pr), { maxOutChars: 8000 });
+      chunks.push(`### ${pr}\n\n\`\`\`text\n${d}\n\`\`\`\n`);
+    } else {
+      chunks.push("_(no trace zip on pass run)_\n");
+    }
+    traceExtra = chunks.join("");
+  }
+  const md = [
+    "# Flake pair (fail vs pass)",
+    "",
+    "The fail run should be the one that exited badly first; the pass run is typically a later retry that succeeded.",
+    "",
+    summary,
+    traceExtra,
+  ].join("\n");
+  const d = await diagnoseFlakeMarkdown(llmClientConfig(config.llm), md);
+  if (!d.ok) {
+    process.stderr.write(chalk.red(JSON.stringify(d.error) + "\n"));
+    process.exit(2);
+  }
+  if (opts.json) {
+    process.stdout.write(
+      JSON.stringify(
+        {
+          failRunId: opts.failRunId,
+          passRunId: opts.passRunId,
+          diagnosis: d.value,
+          policyExitNonZeroVerdicts: policy.flakeDiagnose.exitNonZeroVerdicts,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+  } else {
+    process.stdout.write(
+      `${d.value.verdict} (${d.value.confidence}): ${d.value.rationale}\n\nRecommended:\n${d.value.recommended_actions.map((a) => `- ${a}`).join("\n")}\n`,
+    );
+  }
+  const exit1 = policy.flakeDiagnose.exitNonZeroVerdicts.includes(d.value.verdict);
+  process.exit(exit1 ? 1 : 0);
+}
+
+async function cmdRunsParseFlakeStderr(opts: { file: string }) {
+  const fs = await import("node:fs/promises");
+  const abs = path.resolve(opts.file);
+  let text: string;
+  try {
+    text = await fs.readFile(abs, "utf8");
+  } catch (e) {
+    process.stderr.write(chalk.red(`could not read file: ${abs} (${e})\n`));
+    process.exit(2);
+  }
+  const pair = findFlakePairFromStderrLog(text);
+  if (pair) {
+    process.stdout.write(`${pair.priorFailedRunId} ${pair.passedRunId}\n`);
+  }
+}
+
+async function cmdPolicy(sub: string, opts: { cwd: string; force?: boolean | undefined }) {
+  const fs = await import("node:fs/promises");
+  const target = path.join(opts.cwd, "lookout.policy.json");
+  if (sub === "show") {
+    const r = await loadPolicyPack(opts.cwd);
+    if (!r.ok) {
+      process.stderr.write(chalk.red(`lookout.policy.json: ${JSON.stringify(r.error)}\n`));
+      process.exit(2);
+    }
+    process.stdout.write(JSON.stringify(r.value, null, 2) + "\n");
+    return;
+  }
+  if (sub === "validate") {
+    const r = await loadPolicyPack(opts.cwd);
+    if (!r.ok) {
+      process.stderr.write(chalk.red(`lookout.policy.json: ${JSON.stringify(r.error)}\n`));
+      process.exit(2);
+    }
+    process.stdout.write(chalk.green("lookout.policy.json is valid\n"));
+    return;
+  }
+  if (sub === "init") {
+    try {
+      await fs.access(target);
+      if (!opts.force) {
+        process.stderr.write(chalk.red("lookout.policy.json already exists (use --force)\n"));
+        process.exit(2);
+      }
+    } catch {
+      // ok
+    }
+    await fs.writeFile(target, `${POLICY_INIT_TEMPLATE.trim()}\n`, "utf8");
+    process.stdout.write(chalk.green(`wrote ${target}\n`));
+    return;
+  }
+  process.stderr.write(chalk.red("unknown policy subcommand (use show|validate|init)\n"));
+  process.exit(2);
+}
+
 async function cmdInit(opts: { cwd: string; force?: boolean | undefined }) {
   const fs = await import("node:fs/promises");
   const target = path.join(opts.cwd, "lookout.config.ts");
@@ -532,17 +598,36 @@ async function listAllSteps(
   return out;
 }
 
+function clipForPrompt(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return `${s.slice(0, max)}\n/* …truncated (${s.length} chars total) */\n`;
+}
+
 async function cmdHeal(opts: {
   cwd: string;
   configFile?: string | undefined;
   run?: string | undefined;
   out?: string | undefined;
+  /** When set, include this Playwright spec plus trace digests and ask the model for a unified diff (## Proposed spec edits). */
+  spec?: string | undefined;
+  /** Apply first ```diff from model output to `--spec` (requires `--spec`; writes `*.lookout-heal.bak` on success). */
+  apply?: boolean | undefined;
+  /** With `--apply`: verify patch applies but do not write files (CI-safe rehearsal). */
+  dryRun?: boolean | undefined;
+  /** After a failed apply, ask the model to repair the unified diff (also set heal.repairOnApplyFailure in lookout.policy.json). */
+  repair?: boolean | undefined;
 }) {
   const cfgRes = await loadConfig(opts.cwd, opts.configFile ? { configFile: opts.configFile } : undefined);
   if (!cfgRes.ok) {
     process.stderr.write(chalk.red(`Config error: ${JSON.stringify(cfgRes.error)}\n`));
     process.exit(2);
   }
+  const polRes = await loadPolicyPack(opts.cwd);
+  if (!polRes.ok) {
+    process.stderr.write(chalk.red(`lookout.policy.json: ${JSON.stringify(polRes.error)}\n`));
+    process.exit(2);
+  }
+  const policy = polRes.value;
   const config = cfgRes.value;
   const store = createStore(path.join(opts.cwd, ".lookout"));
   const init = await store.init();
@@ -553,24 +638,174 @@ async function cmdHeal(opts: {
     process.stderr.write(chalk.red("no run found\n"));
     process.exit(2);
   }
+  if (opts.apply && !opts.spec) {
+    process.stderr.write(chalk.red("--apply requires --spec (path to the Playwright file to patch)\n"));
+    process.exit(2);
+  }
+  if (opts.dryRun && !opts.apply) {
+    process.stderr.write(chalk.red("--dry-run requires --apply\n"));
+    process.exit(2);
+  }
+  if (opts.apply && process.env["CI"] === "true" && process.env["LOOKOUT_HEAL_APPLY"] !== "1") {
+    process.stderr.write(
+      chalk.red(
+        "refusing --apply while CI=true unless LOOKOUT_HEAL_APPLY=1 (avoids accidental spec writes in pipelines)\n",
+      ),
+    );
+    process.exit(2);
+  }
+
+  const fs = await import("node:fs/promises");
+  let specAbs: string | undefined;
+  let specSrc: string | undefined;
+  if (opts.spec) {
+    specAbs = path.resolve(opts.cwd, opts.spec);
+    try {
+      specSrc = await fs.readFile(specAbs, "utf8");
+    } catch (e) {
+      process.stderr.write(chalk.red(`could not read --spec file: ${specAbs} (${e})\n`));
+      process.exit(2);
+    }
+  }
+
   const goals = await store.listGoalsForRun(runId);
   const issues = await store.listIssuesForRun(runId);
+  const storeRoot = path.join(opts.cwd, ".lookout");
+  const bundle = await buildRunExportBundle(store, storeRoot, opts.cwd, runId);
+  let artifactTail = "";
+  if (bundle) {
+    artifactTail = `\n\n## Bundled artifacts\n- HTML report: \`${bundle.artifacts.reportHtmlRelative}\`\n`;
+    if (bundle.artifacts.traceZips.length) {
+      artifactTail += bundle.artifacts.traceZips
+        .map(
+          (rel) =>
+            `- Playwright trace \`${rel}\` — inspect: \`npx playwright show-trace ${path.resolve(opts.cwd, rel)}\``,
+        )
+        .join("\n");
+      artifactTail += "\n";
+    }
+    artifactTail +=
+      "\nWhen suggesting selector fixes, prefer `getByRole` / accessible names aligned with the a11y tree snapshots stored per step (see goalSteps in `lookout runs export`).\n";
+  }
+
+  let traceDigestBlock = "";
+  if (opts.spec && bundle?.artifacts.traceZips.length) {
+    const maxZips = 2;
+    const parts: string[] = [
+      "\n\n## Playwright trace digest (machine-extracted from NDJSON inside trace zip)\n",
+    ];
+    for (const rel of bundle.artifacts.traceZips.slice(0, maxZips)) {
+      const absZip = path.resolve(opts.cwd, rel);
+      const digest = await digestPlaywrightTraceZip(absZip, { maxOutChars: 12_000 });
+      parts.push(`### ${rel}\n\n\`\`\`text\n${digest}\n\`\`\`\n`);
+    }
+    traceDigestBlock = parts.join("\n");
+  } else if (opts.spec) {
+    traceDigestBlock =
+      "\n\n## Playwright trace digest\n\n_(no `trace*.zip` found for this run — enable `report.traceOnFailure` in config and reproduce a failing goal, or use `lookout ci` with tracing on failure.)_\n";
+  }
+
+  let specBlock = "";
+  if (opts.spec && specSrc !== undefined) {
+    specBlock = `\n\n## Current Playwright spec (\`${opts.spec}\`)\n\n\`\`\`typescript\n${clipForPrompt(specSrc, 80_000)}\n\`\`\`\n`;
+  }
+
   const md = formatHealMarkdown(
     runId,
     goals.map((g) => ({ id: g.id, status: g.status, prompt: g.prompt })),
     issues.map((i) => ({ severity: i.severity, title: i.title, category: i.category, detail: i.detail })),
-  );
-  const r = await suggestHealingMarkdown(llmClientConfig(config.llm), md);
+  )
+    .concat(artifactTail)
+    .concat(traceDigestBlock)
+    .concat(specBlock);
+
+  const r = await suggestHealingMarkdown(llmClientConfig(config.llm), md, {
+    specPatchMode: Boolean(opts.spec),
+  });
   if (!r.ok) {
     process.stderr.write(chalk.red(JSON.stringify(r.error) + "\n"));
     process.exit(2);
   }
-  const fs = await import("node:fs/promises");
   if (opts.out) {
     await fs.writeFile(path.resolve(opts.cwd, opts.out), r.value, "utf8");
     process.stdout.write(chalk.green(`wrote ${opts.out}\n`));
   } else {
     process.stdout.write(r.value + "\n");
+  }
+
+  if (opts.apply) {
+    if (specSrc === undefined || specAbs === undefined) {
+      process.stderr.write(chalk.red("internal: --apply without spec content\n"));
+      process.exit(2);
+    }
+    const repairEnabled = Boolean(opts.repair) || policy.heal.repairOnApplyFailure;
+    const maxRepair = policy.heal.maxRepairAttempts;
+    let healMarkdown = r.value;
+    let patch = extractUnifiedDiffFromHealMarkdown(healMarkdown);
+    if (!patch) {
+      process.stderr.write(
+        chalk.red(
+          "heal output had no ```diff / ```patch block to apply (look for ## Proposed spec edits from the model)\n",
+        ),
+      );
+      process.exit(2);
+    }
+    let next = tryApplyUnifiedDiff(specSrc, patch);
+    let repairsUsed = 0;
+    while (next === false && repairEnabled && repairsUsed < maxRepair) {
+      repairsUsed++;
+      const repairUser = [
+        "## Current spec (full file)",
+        "",
+        "```typescript",
+        specSrc,
+        "```",
+        "",
+        "## Failed unified diff (did not apply)",
+        "",
+        "```diff",
+        patch,
+        "```",
+        "",
+        "## Prior model output (for context)",
+        "",
+        healMarkdown.slice(0, 60_000),
+      ].join("\n");
+      const rep = await suggestRepairUnifiedDiffMarkdown(llmClientConfig(config.llm), repairUser);
+      if (!rep.ok) {
+        process.stderr.write(chalk.red(`repair LLM call failed: ${JSON.stringify(rep.error)}\n`));
+        break;
+      }
+      healMarkdown = rep.value;
+      process.stdout.write(chalk.yellow(`heal: repair attempt ${repairsUsed}/${maxRepair} (re-parsing diff)\n`));
+      const newPatch = extractUnifiedDiffFromHealMarkdown(healMarkdown);
+      if (!newPatch) break;
+      patch = newPatch;
+      next = tryApplyUnifiedDiff(specSrc, patch);
+    }
+    if (next === false) {
+      process.stderr.write(
+        chalk.red(
+          "patch did not apply cleanly to the spec file (left unchanged). Re-run heal, use --repair, or edit lookout.policy.json heal.*\n",
+        ),
+      );
+      process.exit(1);
+    }
+    if (opts.dryRun) {
+      process.stdout.write(
+        chalk.cyan(
+          `dry-run: patch applies cleanly (${specSrc.length} → ${next.length} chars). Remove --dry-run (and set LOOKOUT_HEAL_APPLY=1 in CI) to write spec + *.lookout-heal.bak\n`,
+        ),
+      );
+      process.exit(0);
+    }
+    const bakPath = `${specAbs}.lookout-heal.bak`;
+    await fs.writeFile(bakPath, specSrc, "utf8");
+    await fs.writeFile(specAbs, next, "utf8");
+    process.stdout.write(chalk.green(`applied heal diff → ${specAbs}\nbackup → ${bakPath}\n`));
+    if (repairsUsed > 0) {
+      process.stdout.write(chalk.yellow(`(used ${repairsUsed} automatic repair pass(es))\n`));
+    }
   }
 }
 
@@ -612,6 +847,12 @@ async function cmdVerifyRun(opts: {
     process.stderr.write(chalk.red(`Config error: ${JSON.stringify(cfgRes.error)}\n`));
     process.exit(2);
   }
+  const polRes = await loadPolicyPack(opts.cwd);
+  if (!polRes.ok) {
+    process.stderr.write(chalk.red(`lookout.policy.json: ${JSON.stringify(polRes.error)}\n`));
+    process.exit(2);
+  }
+  const policy = polRes.value;
   const config = cfgRes.value;
   const storeRoot = path.join(opts.cwd, ".lookout");
   const store = createStore(storeRoot);
@@ -628,6 +869,10 @@ async function cmdVerifyRun(opts: {
     process.stderr.write(chalk.red("run not found\n"));
     process.exit(2);
   }
+  const policyBlock =
+    policy.verifyRun.appendMarkdown.trim().length > 0
+      ? `\n\n## Team policy (lookout.policy.json)\n\n${policy.verifyRun.appendMarkdown.trim()}\n`
+      : "";
   const md = [
     "# Lookout run (agent judge input)",
     "",
@@ -636,6 +881,7 @@ async function cmdVerifyRun(opts: {
     "```json",
     JSON.stringify(bundle, null, 2),
     "```",
+    policyBlock,
   ].join("\n");
   const j = await judgeRunMarkdown(llmClientConfig(config.llm), md);
   if (!j.ok) {
@@ -660,6 +906,16 @@ export async function main(argv: string[]) {
     .option("--force")
     .action(async (o: { cwd?: string; force?: boolean }) =>
       cmdInit({ cwd: path.resolve(o.cwd ?? process.cwd()), force: o.force }),
+    );
+
+  program
+    .command("policy")
+    .description("Team policy pack (lookout.policy.json): flake exit codes, verify-run rubric, heal repair defaults")
+    .argument("<sub>", "show | validate | init")
+    .option("-C, --cwd <dir>", "project root", process.cwd())
+    .option("--force", "with init: overwrite existing lookout.policy.json")
+    .action(async (sub: string, o: { cwd?: string; force?: boolean }) =>
+      cmdPolicy(sub, { cwd: path.resolve(o.cwd ?? process.cwd()), force: o.force }),
     );
 
   program
@@ -750,6 +1006,44 @@ export async function main(argv: string[]) {
     );
 
   runs
+    .command("diagnose-flake")
+    .description(
+      "LLM triage for retry scenarios: compare a failed run vs a later passing run (bundles + step timing skew); exit 1 if verdict is in lookout.policy.json flakeDiagnose.exitNonZeroVerdicts",
+    )
+    .argument("<failRunId>", "run that failed (e.g. first CI attempt)")
+    .argument("<passRunId>", "run that passed (e.g. retry that succeeded)")
+    .option("-C, --cwd <dir>", "project root", process.cwd())
+    .option("--config <file>", "config file path (relative to cwd or absolute)")
+    .option(
+      "--with-trace-digests",
+      "append machine-extracted NDJSON digests from the first trace zip of each run (noisy but high-signal)",
+    )
+    .option("--json", "structured diagnosis JSON")
+    .action(
+      async (
+        failRunId: string,
+        passRunId: string,
+        o: { cwd?: string; config?: string; json?: boolean; withTraceDigests?: boolean },
+      ) =>
+        cmdRunsDiagnoseFlake({
+          cwd: path.resolve(o.cwd ?? process.cwd()),
+          failRunId,
+          passRunId,
+          json: Boolean(o.json),
+          configFile: o.config,
+          withTraceDigests: Boolean(o.withTraceDigests),
+        }),
+    );
+
+  runs
+    .command("parse-flake-stderr")
+    .description(
+      "Read a file containing `lookout ci` stderr; if a flake_suspected line includes prior_failed_run_id + passed_run_id, print them as: <prior> <pass> (for shell capture in CI)",
+    )
+    .argument("<file>", "path to captured stderr (e.g. from: lookout ci ... 2> ci-stderr.txt)")
+    .action(async (file: string) => cmdRunsParseFlakeStderr({ file }));
+
+  runs
     .command("emit-playwright")
     .description(
       "Emit Playwright .spec.ts files from a run's completed goals (same as generate-tests; only goals with status complete)",
@@ -833,18 +1127,50 @@ export async function main(argv: string[]) {
 
   program
     .command("heal")
-    .description("LLM-assisted markdown suggestions from the latest run's issues")
+    .description(
+      "LLM-assisted markdown from the latest run's issues; with --spec, ingests Playwright trace NDJSON and requests a unified diff (## Proposed spec edits)",
+    )
     .option("-C, --cwd <dir>", "project root", process.cwd())
     .option("--config <file>", "config file path (relative to cwd or absolute)")
     .option("--run <id>", "run id (default: latest)")
+    .option(
+      "--spec <file>",
+      "path to an existing Playwright .spec.ts to heal (relative to cwd); enables trace digest + spec-patch prompt",
+    )
+    .option(
+      "--apply",
+      "after heal, apply the first ```diff / ```patch from the model to --spec (writes *.lookout-heal.bak first); requires --spec",
+    )
+    .option(
+      "--dry-run",
+      "with --apply: verify the patch applies but do not write files; in CI with CI=true, --apply still requires LOOKOUT_HEAL_APPLY=1",
+    )
+    .option(
+      "--repair",
+      "if --apply patch fails, run a repair LLM pass (up to max in lookout.policy.json heal.maxRepairAttempts; or set heal.repairOnApplyFailure there)",
+    )
     .option("--out <file>", "write markdown to file instead of stdout")
-    .action(async (o: { cwd?: string; config?: string; run?: string; out?: string }) =>
-      cmdHeal({
-        cwd: path.resolve(o.cwd ?? process.cwd()),
-        configFile: o.config,
-        run: o.run,
-        out: o.out,
-      }),
+    .action(
+      async (o: {
+        cwd?: string;
+        config?: string;
+        run?: string;
+        out?: string;
+        spec?: string;
+        apply?: boolean;
+        dryRun?: boolean;
+        repair?: boolean;
+      }) =>
+        cmdHeal({
+          cwd: path.resolve(o.cwd ?? process.cwd()),
+          configFile: o.config,
+          run: o.run,
+          out: o.out,
+          spec: o.spec,
+          apply: Boolean(o.apply),
+          dryRun: Boolean(o.dryRun),
+          repair: Boolean(o.repair),
+        }),
     );
 
   program
