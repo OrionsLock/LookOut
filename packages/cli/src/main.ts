@@ -11,6 +11,7 @@ import { buildRunExportBundle, createStore, diffIssuesByFingerprint } from "@loo
 import { emitAll, type EmitSpecInput } from "@lookout/emitter-playwright";
 import { registerRunCommand } from "./commands/run.js";
 import { registerCiCommand } from "./commands/ci.js";
+import { registerRunsListCommand } from "./commands/runs/list.js";
 
 function emitAuthFromConfig(config: ResolvedLookoutConfig): EmitSpecInput["auth"] {
   if (config.auth.type === "credentials") {
@@ -43,30 +44,6 @@ function llmClientConfig(llm: ResolvedLookoutConfig["llm"]): LLMConfig {
 function formatHealMarkdown(runId: string, goals: { id: string; status: string; prompt: string }[], issues: { severity: string; title: string; category: string; detail: unknown }[]): string {
   const lines = [`# Run ${runId}`, "", "## Goals", ...goals.map((g) => `- **${g.id}** (${g.status}): ${g.prompt}`), "", "## Issues", ...issues.map((i) => `- [${i.severity}/${i.category}] ${i.title}: \`${JSON.stringify(i.detail).slice(0, 500)}\``)];
   return lines.join("\n");
-}
-
-async function cmdRunsList(opts: { cwd: string; limit: number; json: boolean }) {
-  const store = createStore(path.join(opts.cwd, ".lookout"));
-  const init = await store.init();
-  if (!init.ok) {
-    process.stderr.write(chalk.red("store init failed\n"));
-    process.exit(2);
-  }
-  const runs = await store.listRuns({ limit: opts.limit });
-  if (opts.json) {
-    process.stdout.write(JSON.stringify({ runs }, null, 2) + "\n");
-    return;
-  }
-  if (!runs.length) {
-    process.stdout.write("(no runs)\n");
-    return;
-  }
-  for (const r of runs) {
-    const sum = r.summary && typeof r.summary === "object" ? JSON.stringify(r.summary) : "";
-    process.stdout.write(
-      `${r.id}\t${r.verdict}\t${r.baseUrl}\tendedAt=${r.endedAt ?? "—"}\t${sum.slice(0, 120)}${sum.length > 120 ? "…" : ""}\n`,
-    );
-  }
 }
 
 async function cmdRunsDiff(opts: { cwd: string; runA: string; runB: string; json: boolean }) {
@@ -398,19 +375,7 @@ export async function main(argv: string[]) {
 
   const runs = program.command("runs").description("List, compare, and export runs from .lookout");
 
-  runs
-    .command("list")
-    .description("List recent runs")
-    .option("-C, --cwd <dir>", "project root", process.cwd())
-    .option("--limit <n>", "max runs", "20")
-    .option("--json", "machine-readable JSON")
-    .action(async (o: { cwd?: string; limit?: string; json?: boolean }) =>
-      cmdRunsList({
-        cwd: path.resolve(o.cwd ?? process.cwd()),
-        limit: Math.max(1, Math.min(500, Number(o.limit ?? 20) || 20)),
-        json: Boolean(o.json),
-      }),
-    );
+  registerRunsListCommand(runs);
 
   runs
     .command("diff")
