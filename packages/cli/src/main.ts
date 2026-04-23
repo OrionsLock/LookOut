@@ -13,6 +13,7 @@ import { registerRunCommand } from "./commands/run.js";
 import { registerCiCommand } from "./commands/ci.js";
 import { registerRunsListCommand } from "./commands/runs/list.js";
 import { registerRunsDiffCommand } from "./commands/runs/diff.js";
+import { registerRunsExportCommand } from "./commands/runs/export.js";
 
 function emitAuthFromConfig(config: ResolvedLookoutConfig): EmitSpecInput["auth"] {
   if (config.auth.type === "credentials") {
@@ -80,25 +81,6 @@ async function cmdRunsEmitPlaywright(opts: {
     auth: emitAuthFromConfig(config),
   });
   process.stdout.write(chalk.green(`emitted Playwright specs for run ${opts.runId} → ${outDir}\n`));
-}
-
-async function cmdRunsExport(opts: { cwd: string; runId: string; out: string }) {
-  const storeRoot = path.join(opts.cwd, ".lookout");
-  const store = createStore(storeRoot);
-  const init = await store.init();
-  if (!init.ok) {
-    process.stderr.write(chalk.red("store init failed\n"));
-    process.exit(2);
-  }
-  const bundle = await buildRunExportBundle(store, storeRoot, opts.cwd, opts.runId);
-  if (!bundle) {
-    process.stderr.write(chalk.red("run not found\n"));
-    process.exit(2);
-  }
-  const fs = await import("node:fs/promises");
-  const outPath = path.resolve(opts.cwd, opts.out);
-  await fs.writeFile(outPath, JSON.stringify(bundle, null, 2), "utf8");
-  process.stdout.write(chalk.green(`wrote ${outPath}\n`));
 }
 
 async function cmdInit(opts: { cwd: string; force?: boolean | undefined }) {
@@ -331,21 +313,7 @@ export async function main(argv: string[]) {
 
   registerRunsDiffCommand(runs);
 
-  runs
-    .command("export")
-    .description(
-      "Export run bundle as JSON v2 (run, goals, goalSteps, issues, report path, trace*.zip paths) for CI or sharing",
-    )
-    .argument("<runId>")
-    .requiredOption("--out <file>", "output path (relative to cwd or absolute)")
-    .option("-C, --cwd <dir>", "project root", process.cwd())
-    .action(async (runId: string, o: { cwd?: string; out: string }) =>
-      cmdRunsExport({
-        cwd: path.resolve(o.cwd ?? process.cwd()),
-        runId,
-        out: o.out,
-      }),
-    );
+  registerRunsExportCommand(runs);
 
   runs
     .command("emit-playwright")
