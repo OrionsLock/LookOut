@@ -19,13 +19,13 @@
   },
   "dependencies": {
     "@lookout/types": "workspace:*",
-    "better-sqlite3": "^11.7.0",
-    "ulid": "^2.3.0"
+    "better-sqlite3": "^12.9.0",
+    "ulid": "^3.0.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "tsup": "^8.3.5",
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
   }
 }
