@@ -23,12 +23,12 @@
     "@lookout/store": "workspace:*",
     "@lookout/types": "workspace:*",
     "pngjs": "^7.0.0",
-    "pixelmatch": "^7.1.0"
+    "pixelmatch": "^7.2.0"
   },
   "devDependencies": {
     "@types/pixelmatch": "^5.2.6",
     "tsup": "^8.3.5",
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   }
 }
